@@ -11,6 +11,7 @@ name: tablesoft-testdb
 services:
   postgres:
     image: postgres:17
+    restart: unless-stopped
     environment:
       POSTGRES_USER: tablesoft
       POSTGRES_PASSWORD: tablesoft
@@ -27,6 +28,7 @@ services:
 
   mysql:
     image: mysql:8.4
+    restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: tablesoft
       MYSQL_USER: tablesoft
@@ -44,6 +46,7 @@ services:
 
   mariadb:
     image: mariadb:11.8
+    restart: unless-stopped
     environment:
       MARIADB_ROOT_PASSWORD: tablesoft
       MARIADB_USER: tablesoft
@@ -62,6 +65,7 @@ services:
   mongo:
     # 8.0 refuses to start on Linux kernels >= 6.19 (SERVER-121912), which current Docker VMs ship.
     image: mongo:8.2
+    restart: unless-stopped
     environment:
       MONGO_INITDB_DATABASE: tablesoft
     ports: ["27117:27017"]
