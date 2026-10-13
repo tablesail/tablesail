@@ -19,8 +19,8 @@ use sqlx::{
 
 use super::sqlcommon::{
     CancelState, ESTIMATE_ONLY_ABOVE, IdleList, Lease, Pump, StructureCache, apply_in_transaction,
-    connection_survives, count_sql, editability, insert_in_transaction, insert_statements,
-    is_unfiltered, meta, select_sql,
+    cancel_until_stopped, connection_survives, count_sql, editability, insert_in_transaction,
+    insert_statements, is_unfiltered, meta, select_sql, tiebreak_columns,
 };
 use crate::Engine;
 use crate::changes::change_statements;
@@ -289,12 +289,21 @@ fn classify(name: &str, binary_collation: bool) -> (MyKind, TypeFamily, String) 
     }
 }
 
+/// sqlx names SET columns `CHAR`; the column flags tell them apart.
+fn is_set_column(ti: &MySqlTypeInfo) -> bool {
+    ti.name() == "CHAR" && format!("{ti:?}").contains("SET")
+}
+
 fn columns_of(columns: &[MySqlColumn]) -> Vec<MyCol> {
     columns
         .iter()
         .map(|c| {
             let ti = c.type_info();
-            let (kind, family, name) = classify(ti.name(), has_binary_collation(ti));
+            let (kind, family, name) = if is_set_column(ti) {
+                classify("SET", false)
+            } else {
+                classify(ti.name(), has_binary_collation(ti))
+            };
             MyCol {
                 meta: meta(c.name(), name, family),
                 kind,
@@ -560,6 +569,10 @@ impl MysqlDriver {
             }
         }
         let kind = statement_kind(sql, self.dialect);
+        if kind == StatementKind::Ddl {
+            // The cached table structures may be about to go stale.
+            self.cache.clear();
+        }
         let state = Arc::new(CancelState::default());
         state.start();
         let cancel = Arc::new(MysqlCancel {
@@ -571,7 +584,10 @@ impl MysqlDriver {
             let cancel = cancel.clone();
             move || {
                 Box::pin(async move {
-                    let _ = cancel.cancel().await;
+                    // The connection is closed right after, so once is enough.
+                    if cancel.state.request() {
+                        let _ = cancel.fire().await;
+                    }
                 })
             }
         });
@@ -800,6 +816,13 @@ impl CancelHandle for MysqlCancel {
         if !self.state.request() {
             return Ok(());
         }
+        cancel_until_stopped(&self.state, || self.fire()).await
+    }
+}
+
+impl MysqlCancel {
+    /// One `KILL QUERY`.
+    async fn fire(&self) -> Result<()> {
         sqlx::raw_sql(logged(format!("KILL QUERY {}", self.id)))
             .execute(&self.pool)
             .await?;
@@ -880,11 +903,12 @@ impl Driver for MysqlDriver {
         let started = Instant::now();
         let mut request = request.clone();
         request.table = self.qualified_table(&request.table)?;
-        let key = if request.sort.is_empty() {
-            self.primary_key(&request.table).await?
-        } else {
-            Arc::new(Vec::new())
-        };
+        // The key orders unsorted pages and breaks ties between sorted ones; a table
+        // without one is tie-broken by its columns.
+        let mut key = self.primary_key(&request.table).await?;
+        if key.is_empty() && !request.sort.is_empty() {
+            key = Arc::new(tiebreak_columns(&*self.structure(&request.table).await?));
+        }
         let sql = select_sql(self.dialect, &request, &key, Some((limit, offset)))?;
         let rows = sqlx::raw_sql(logged(sql.clone()))
             .fetch_all(&self.pool)

@@ -21,7 +21,7 @@ use crate::driver::CursorEvent;
 use crate::error::{Error, Result};
 use crate::model::{
     ApplyResult, BrowseRequest, ColumnMeta, Editability, RowChange, TableKind, TableRef,
-    TableStructure,
+    TableStructure, TypeFamily,
 };
 use crate::querylog::{logged, record};
 use crate::value::Row;
@@ -170,8 +170,46 @@ pub fn where_sql(d: Dialect, req: &BrowseRequest) -> Result<Option<String>> {
     Ok((!parts.is_empty()).then(|| parts.join(" AND ")))
 }
 
+/// Most columns a table without a primary key is tie-broken by.
+const MAX_TIEBREAK_COLUMNS: usize = 16;
+
+/// Columns that make a page order total, for a table whose rows can be told apart by
+/// them: the primary key, or - for a table without one - its leading columns that have a
+/// sort order (JSON, XML, geometry and the like have none). Rows that agree on all of
+/// them are identical as far as the grid can tell, so their order does not matter.
+pub fn tiebreak_columns(structure: &TableStructure) -> Vec<String> {
+    if !structure.primary_key.is_empty() {
+        return structure.primary_key.clone();
+    }
+    structure
+        .columns
+        .iter()
+        .filter(|c| {
+            matches!(
+                c.family,
+                TypeFamily::Boolean
+                    | TypeFamily::Integer
+                    | TypeFamily::Float
+                    | TypeFamily::Decimal
+                    | TypeFamily::Text
+                    | TypeFamily::Binary
+                    | TypeFamily::Date
+                    | TypeFamily::Time
+                    | TypeFamily::DateTime
+                    | TypeFamily::Uuid
+                    | TypeFamily::Enum
+            ) && !c.data_type.to_ascii_lowercase().starts_with("xml")
+        })
+        .take(MAX_TIEBREAK_COLUMNS)
+        .map(|c| c.name.clone())
+        .collect()
+}
+
 /// `SELECT cols FROM table [WHERE …] [ORDER BY …] [LIMIT n OFFSET m]`.
-/// Without an explicit sort, `default_order` (the primary key) orders the rows.
+/// Without an explicit sort, `default_order` (the primary key) orders the rows. A
+/// paged query with an explicit sort gets the `default_order` columns appended as
+/// tie-breakers: sorting by a column with duplicates is otherwise free to order the
+/// ties differently from one page to the next, so rows would repeat or go missing.
 pub fn select_sql(
     d: Dialect,
     req: &BrowseRequest,
@@ -195,7 +233,8 @@ pub fn select_sql(
     let order: Vec<String> = if req.sort.is_empty() {
         default_order.iter().map(|c| d.quote_ident(c)).collect()
     } else {
-        req.sort
+        let mut order: Vec<String> = req
+            .sort
             .iter()
             .map(|s| {
                 format!(
@@ -204,7 +243,16 @@ pub fn select_sql(
                     if s.descending { "DESC" } else { "ASC" }
                 )
             })
-            .collect()
+            .collect();
+        if page.is_some() {
+            order.extend(
+                default_order
+                    .iter()
+                    .filter(|key| !req.sort.iter().any(|s| s.column.eq_ignore_ascii_case(key)))
+                    .map(|key| format!("{} ASC", d.quote_ident(key))),
+            );
+        }
+        order
     };
     if !order.is_empty() {
         sql.push_str(" ORDER BY ");
@@ -439,6 +487,37 @@ impl CancelState {
             Error::Cancelled
         } else {
             err
+        }
+    }
+}
+
+/// How often a cancel is repeated while its statement keeps running, and for how long at most.
+const CANCEL_RETRY_EVERY: Duration = Duration::from_millis(100);
+const CANCEL_RETRY_FOR: Duration = Duration::from_secs(4);
+
+/// Cancels a statement by calling `fire` (the engine's server-side cancel), and repeats it
+/// for as long as the statement keeps running. A cancel that reaches the server before the
+/// statement does (the cursor was just opened, the server is busy) is silently lost, and
+/// the statement would otherwise run on to its end. (A repeat is only sent while the
+/// statement is still active; a caller that does not wait for the cancel to return and starts
+/// another statement on the same connection at once can still see it hit that one.)
+pub async fn cancel_until_stopped<F, Fut>(state: &CancelState, mut fire: F) -> Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<()>>,
+{
+    let started = Instant::now();
+    loop {
+        fire().await?;
+        let waited = Instant::now();
+        while waited.elapsed() < CANCEL_RETRY_EVERY {
+            if !state.active.load(Ordering::SeqCst) {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if !state.active.load(Ordering::SeqCst) || started.elapsed() >= CANCEL_RETRY_FOR {
+            return Ok(());
         }
     }
 }
@@ -731,6 +810,79 @@ mod tests {
         assert_eq!(
             sql,
             "SELECT \"a\", \"b\" FROM \"public\".\"t\" ORDER BY \"a\" DESC, \"b\" ASC"
+        );
+    }
+
+    #[test]
+    fn tables_without_a_key_are_tie_broken_by_their_orderable_columns() {
+        use crate::model::{ColumnInfo, Editability};
+        let col = |name: &str, ty: &str, family: TypeFamily| ColumnInfo {
+            name: name.into(),
+            data_type: ty.into(),
+            family,
+            nullable: true,
+            default: None,
+            is_primary_key: false,
+            is_auto_increment: false,
+            is_generated: false,
+            enum_values: None,
+            comment: None,
+        };
+        let mut s = TableStructure {
+            table: table(),
+            kind: TableKind::Table,
+            columns: vec![
+                col("a", "integer", TypeFamily::Integer),
+                col("doc", "json", TypeFamily::Json),
+                col("x", "xml", TypeFamily::Text),
+                col("shape", "point", TypeFamily::Spatial),
+                col("name", "text", TypeFamily::Text),
+                col("at", "timestamptz", TypeFamily::DateTime),
+            ],
+            primary_key: vec![],
+            indexes: vec![],
+            foreign_keys: vec![],
+            editability: Editability::ReadOnly(NO_PK_REASON.into()),
+            ddl: None,
+        };
+        assert_eq!(tiebreak_columns(&s), ["a", "name", "at"]);
+        // A key wins, as the key alone is enough.
+        s.primary_key = vec!["name".into()];
+        assert_eq!(tiebreak_columns(&s), ["name"]);
+        // Wide tables are cut off.
+        s.primary_key.clear();
+        s.columns = (0..40)
+            .map(|i| col(&format!("c{i}"), "integer", TypeFamily::Integer))
+            .collect();
+        assert_eq!(tiebreak_columns(&s).len(), MAX_TIEBREAK_COLUMNS);
+    }
+
+    #[test]
+    fn paged_sorts_are_tie_broken_by_the_key() {
+        let mut r = request();
+        r.sort = vec![Sort {
+            column: "a".into(),
+            descending: true,
+        }];
+        let key = vec!["id".to_owned(), "tenant".to_owned()];
+        // Pages get the key as a tie-breaker, so equal values keep one order across pages.
+        assert_eq!(
+            select_sql(PG, &r, &key, Some((10, 20))).unwrap(),
+            "SELECT * FROM \"public\".\"t\" ORDER BY \"a\" DESC, \"id\" ASC, \"tenant\" ASC LIMIT 10 OFFSET 20"
+        );
+        // A key column the sort already names is not repeated.
+        r.sort.push(Sort {
+            column: "ID".into(),
+            descending: true,
+        });
+        assert_eq!(
+            select_sql(PG, &r, &key, Some((10, 0))).unwrap(),
+            "SELECT * FROM \"public\".\"t\" ORDER BY \"a\" DESC, \"ID\" DESC, \"tenant\" ASC LIMIT 10 OFFSET 0"
+        );
+        // Whole-table reads (export) are not paged and need no tie-break.
+        assert_eq!(
+            select_sql(PG, &r, &key, None).unwrap(),
+            "SELECT * FROM \"public\".\"t\" ORDER BY \"a\" DESC, \"ID\" DESC"
         );
     }
 

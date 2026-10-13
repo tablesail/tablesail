@@ -15,8 +15,9 @@ use sqlx::{
 };
 
 use super::sqlcommon::{
-    CancelState, IdleList, Lease, Pump, StructureCache, apply_in_transaction, connection_survives,
-    count_sql, editability, insert_in_transaction, insert_statements, meta, select_sql,
+    CancelState, IdleList, Lease, Pump, StructureCache, apply_in_transaction, cancel_until_stopped,
+    connection_survives, count_sql, editability, insert_in_transaction, insert_statements, meta,
+    select_sql, tiebreak_columns,
 };
 use crate::Engine;
 use crate::changes::change_statements;
@@ -140,8 +141,13 @@ impl Interrupt {
 #[async_trait]
 impl CancelHandle for Interrupt {
     async fn cancel(&self) -> Result<()> {
-        self.fire();
-        Ok(())
+        // An interrupt that arrives before the statement starts stepping does nothing, so
+        // it is repeated until the statement has ended.
+        cancel_until_stopped(&self.state, || async {
+            self.fire();
+            Ok(())
+        })
+        .await
     }
 }
 
@@ -300,6 +306,39 @@ fn db_name(database: &str) -> &str {
 // Driver
 // ---------------------------------------------------------------------------
 
+/// One pooled connection for a series of catalog statements.
+///
+/// PRAGMAs answer from the connection's cached schema, which can be stale when another
+/// connection (the editor's, another program) has created or altered a table since: the
+/// description of a new table then comes back without its indexes and foreign keys. The
+/// first real query on a connection brings the cache up to date, so every series starts
+/// with one and stays on that connection.
+struct Catalog {
+    conn: PoolConnection<Sqlite>,
+}
+
+impl Catalog {
+    async fn open(pool: &SqlitePool, database: &str) -> Result<Catalog> {
+        let mut conn = pool.acquire().await?;
+        sqlx::raw_sql(logged(format!(
+            "SELECT 1 FROM {}.sqlite_master LIMIT 1",
+            DIALECT.quote_ident(db_name(database))
+        )))
+        .fetch_all(&mut *conn)
+        .await?;
+        Ok(Catalog { conn })
+    }
+
+    async fn rows(&mut self, sql: &str) -> Result<TextRows> {
+        let rows = sqlx::raw_sql(logged(sql))
+            .fetch_all(&mut *self.conn)
+            .await?;
+        rows.iter()
+            .map(|r| (0..r.len()).map(|i| sqlite_text(r, i)).collect())
+            .collect()
+    }
+}
+
 impl SqliteDriver {
     async fn text_rows(&self, sql: &str) -> Result<TextRows> {
         let rows = sqlx::raw_sql(logged(sql)).fetch_all(&self.pool).await?;
@@ -323,6 +362,10 @@ impl SqliteDriver {
     async fn start(&self, sql: &str, grid: bool) -> Result<Box<dyn Cursor>> {
         let mut lease = self.lease().await?;
         let kind = statement_kind(sql, DIALECT);
+        if kind == StatementKind::Ddl {
+            // The cached table structures may be about to go stale.
+            self.cache.clear();
+        }
         let interrupt = Interrupt::new(lease.id);
         lease.on_abandon({
             let i = interrupt.clone();
@@ -345,8 +388,9 @@ impl SqliteDriver {
         if let Some(k) = self.cache.primary_key(table) {
             return Ok(k);
         }
-        let rows = self
-            .text_rows(&format!(
+        let mut catalog = Catalog::open(&self.pool, &table.database).await?;
+        let rows = catalog
+            .rows(&format!(
                 "PRAGMA {}.table_info({})",
                 DIALECT.quote_ident(db_name(&table.database)),
                 DIALECT.quote_string(&table.name)
@@ -365,11 +409,11 @@ impl SqliteDriver {
 
     async fn read_structure(&self, table: &TableRef) -> Result<TableStructure> {
         let db = db_name(&table.database).to_owned();
+        let mut catalog = Catalog::open(&self.pool, &db).await?;
         let qdb = DIALECT.quote_ident(&db);
         let qname = DIALECT.quote_string(&table.name);
 
-        let master = self
-            .text_rows(&format!(
+        let master = catalog.rows(&format!(
                 "SELECT type, sql FROM {qdb}.sqlite_master WHERE name = {qname} AND type IN ('table', 'view')"
             ))
             .await?;
@@ -391,8 +435,8 @@ impl SqliteDriver {
             .is_some_and(|d| d.to_ascii_uppercase().contains("WITHOUT ROWID"));
 
         // cid, name, type, notnull, dflt_value, pk, hidden
-        let info = self
-            .text_rows(&format!("PRAGMA {qdb}.table_xinfo({qname})"))
+        let info = catalog
+            .rows(&format!("PRAGMA {qdb}.table_xinfo({qname})"))
             .await?;
         let mut pk_positions: Vec<(i64, String)> = Vec::new();
         let mut columns = Vec::new();
@@ -447,14 +491,15 @@ impl SqliteDriver {
         let index_rows = if is_view {
             Vec::new()
         } else {
-            self.text_rows(&format!("PRAGMA {qdb}.index_list({qname})"))
+            catalog
+                .rows(&format!("PRAGMA {qdb}.index_list({qname})"))
                 .await?
         };
         let mut indexes = Vec::new();
         for r in &index_rows {
             let name = cell(r, 1);
-            let cols = self
-                .text_rows(&format!(
+            let cols = catalog
+                .rows(&format!(
                     "PRAGMA {qdb}.index_info({})",
                     DIALECT.quote_string(&name)
                 ))
@@ -488,7 +533,8 @@ impl SqliteDriver {
         let fk_rows = if is_view {
             Vec::new()
         } else {
-            self.text_rows(&format!("PRAGMA {qdb}.foreign_key_list({qname})"))
+            catalog
+                .rows(&format!("PRAGMA {qdb}.foreign_key_list({qname})"))
                 .await?
         };
         let mut foreign_keys: Vec<ForeignKeyInfo> = Vec::new();
@@ -523,8 +569,8 @@ impl SqliteDriver {
         // `REFERENCES t` without columns means t's primary key.
         for fk in &mut foreign_keys {
             if fk.referenced_columns.is_empty() {
-                let rows = self
-                    .text_rows(&format!(
+                let rows = catalog
+                    .rows(&format!(
                         "PRAGMA {qdb}.table_info({})",
                         DIALECT.quote_string(&fk.referenced.name)
                     ))
@@ -669,11 +715,12 @@ impl Driver for SqliteDriver {
 
     async fn browse_page(&self, request: &BrowseRequest, offset: u64, limit: u32) -> Result<Page> {
         let started = Instant::now();
-        let key = if request.sort.is_empty() {
-            self.primary_key(&request.table).await?
-        } else {
-            Arc::new(Vec::new())
-        };
+        // The key orders unsorted pages and breaks ties between sorted ones; a table
+        // without one is tie-broken by its columns.
+        let mut key = self.primary_key(&request.table).await?;
+        if key.is_empty() && !request.sort.is_empty() {
+            key = Arc::new(tiebreak_columns(&*self.structure(&request.table).await?));
+        }
         let sql = select_sql(DIALECT, request, &key, Some((limit, offset)))?;
         let rows = sqlx::raw_sql(logged(sql.clone()))
             .fetch_all(&self.pool)
@@ -769,17 +816,18 @@ async fn run_statement(
             Ok(())
         }
         Err(err) => {
-            let err = if interrupt.state.requested.load(Ordering::SeqCst) {
-                Error::Cancelled
-            } else {
-                err
-            };
+            // An interrupted statement leaves the connection fine, and with it any open
+            // transaction; decide on the real error before it is reported as a cancel.
             if connection_survives(&err) {
                 lease.release();
             } else {
                 lease.discard();
             }
-            Err(err)
+            if interrupt.state.requested.load(Ordering::SeqCst) {
+                Err(Error::Cancelled)
+            } else {
+                Err(err)
+            }
         }
     }
 }

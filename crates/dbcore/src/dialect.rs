@@ -76,6 +76,14 @@ impl Dialect {
 
     /// SQL string literal with dialect-correct escaping.
     pub fn quote_string(&self, s: &str) -> String {
+        if matches!(self, Dialect::Sqlite) && s.contains('\0') {
+            // SQLite stops reading a statement at a NUL, so the text is joined from pieces.
+            let pieces: Vec<String> = s
+                .split('\0')
+                .map(|piece| self.quote_string(piece))
+                .collect();
+            return format!("({})", pieces.join(" || char(0) || "));
+        }
         let mut out = String::with_capacity(s.len() + 2);
         out.push('\'');
         match self {
@@ -119,7 +127,7 @@ impl Dialect {
             },
             Value::Int(i) => i.to_string(),
             Value::UInt(u) => u.to_string(),
-            Value::Float(f) if f.is_finite() => f.to_string(),
+            Value::Float(f) if f.is_finite() => float_literal(*f),
             Value::Float(f) => match self {
                 Dialect::Postgres => {
                     let t = if f.is_nan() {
@@ -276,6 +284,17 @@ impl Dialect {
     }
 }
 
+/// A finite float as a SQL number. Rust's `Display` never writes an exponent, so 1e300
+/// would be 301 digits (which MySQL reads as an out-of-range DECIMAL and rounds) and 1e-300 a
+/// long run of zeros; extreme magnitudes are written in scientific notation instead.
+fn float_literal(f: f64) -> String {
+    if f != 0.0 && (f.abs() >= 1e15 || f.abs() < 1e-5) {
+        format!("{f:e}")
+    } else {
+        f.to_string()
+    }
+}
+
 /// Escapes `\`, `%` and `_` so the text matches literally inside a LIKE pattern.
 pub fn escape_like(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
@@ -406,6 +425,33 @@ mod tests {
         assert_eq!(MY.quote_string("a\\b\0\n\r\u{1a}"), "'a\\\\b\\0\\n\\r\\Z'");
         assert_eq!(MY_NB.quote_string("a\\b'"), "'a\\b'''");
         assert_eq!(MY.quote_string("日本語"), "'日本語'");
+    }
+
+    #[test]
+    fn sqlite_strings_with_nul_are_joined_from_pieces() {
+        assert_eq!(
+            Dialect::Sqlite.quote_string("a\0b'c\0"),
+            "('a' || char(0) || 'b''c' || char(0) || '')"
+        );
+        assert_eq!(Dialect::Sqlite.quote_string("plain"), "'plain'");
+    }
+
+    #[test]
+    fn extreme_floats_use_scientific_notation() {
+        let lit = |f: f64| Dialect::Postgres.literal(&Value::Float(f)).unwrap();
+        assert_eq!(lit(0.0), "0");
+        assert_eq!(lit(1.5), "1.5");
+        assert_eq!(lit(-0.1), "-0.1");
+        assert_eq!(lit(100.0), "100");
+        assert_eq!(lit(123456789.125), "123456789.125");
+        assert_eq!(lit(f64::MAX), "1.7976931348623157e308");
+        assert_eq!(lit(5e-324), "5e-324");
+        assert_eq!(lit(1e-300), "1e-300");
+        assert_eq!(lit(-2.5e20), "-2.5e20");
+        // Every literal reads back as the same number.
+        for f in [f64::MAX, f64::MIN_POSITIVE, 1e15, 1e-5, 0.3, 123456.789e10] {
+            assert_eq!(lit(f).parse::<f64>().unwrap(), f);
+        }
     }
 
     #[test]

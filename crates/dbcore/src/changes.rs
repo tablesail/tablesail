@@ -186,6 +186,8 @@ fn comparable(dialect: Dialect, col: &ColumnInfo, value: &Value) -> bool {
                 !((ty.contains("json") && !ty.contains("jsonb")) || ty.contains("xml"))
             }
             TypeFamily::Spatial | TypeFamily::Other => false,
+            // xml has no equality operator either.
+            TypeFamily::Text => !ty.starts_with("xml"),
             _ => true,
         },
         Dialect::Mysql { .. } => match col.family {
@@ -420,6 +422,22 @@ mod tests {
             [
                 "UPDATE \"public\".\"users\" SET \"name\" = 'x' WHERE \"id\" = 1 AND \"meta\" = '{\"a\":1}'"
             ]
+        );
+    }
+
+    #[test]
+    fn xml_has_no_equality_operator() {
+        let mut s = structure();
+        s.columns.push(col("doc", "xml", TypeFamily::Text, false));
+        let cs = set(vec![RowChange::Update {
+            key: key(1),
+            original: vec![orig("doc", Value::Text("<a/>".into()))],
+            set: vec![text("name", "x")],
+        }]);
+        let sql = change_statements(Dialect::Postgres, &s, &cs).unwrap();
+        assert_eq!(
+            sql,
+            ["UPDATE \"public\".\"users\" SET \"name\" = 'x' WHERE \"id\" = 1"]
         );
     }
 

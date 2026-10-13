@@ -20,8 +20,8 @@ use sqlx::{
 
 use super::sqlcommon::{
     CancelState, ESTIMATE_ONLY_ABOVE, IdleList, Lease, Pump, StructureCache, apply_in_transaction,
-    connection_survives, count_sql, editability, insert_in_transaction, insert_statements,
-    is_unfiltered, meta, select_sql,
+    cancel_until_stopped, connection_survives, count_sql, editability, insert_in_transaction,
+    insert_statements, is_unfiltered, meta, select_sql, tiebreak_columns,
 };
 use crate::Engine;
 use crate::changes::change_statements;
@@ -50,7 +50,8 @@ pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
         .get_database()
         .map(str::to_owned)
         .unwrap_or_else(|| options.get_username().to_owned());
-    let pool = pool_options(DEFAULT_DB_CONNECTIONS)
+    let timezone = session_time_zone(params);
+    let pool = pool_options(DEFAULT_DB_CONNECTIONS, timezone.clone())
         .connect_with(options.clone())
         .await?;
     let db = Arc::new(Db::new(pool));
@@ -60,17 +61,40 @@ pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
     Ok(Arc::new(PgDriver {
         options,
         dbs: Mutex::new(HashMap::from([(default_db.clone(), db)])),
+        timezone,
         default_db,
         version: format!("PostgreSQL {version}"),
         cache: StructureCache::default(),
     }))
 }
 
-fn pool_options(max_connections: u32) -> PgPoolOptions {
-    PgPoolOptions::new()
+fn pool_options(max_connections: u32, timezone: Option<String>) -> PgPoolOptions {
+    let options = PgPoolOptions::new()
         .max_connections(max_connections)
         .acquire_timeout(Duration::from_secs(15))
-        .idle_timeout(Some(Duration::from_secs(600)))
+        .idle_timeout(Some(Duration::from_secs(600)));
+    match timezone {
+        // sqlx always sends `TimeZone=UTC` as a startup parameter, which beats a
+        // `-c timezone=…` startup option, so the zone is set once connected.
+        Some(zone) => options.after_connect(move |conn, _| {
+            let set = format!("SET TIME ZONE {}", DIALECT.quote_string(&zone));
+            Box::pin(async move {
+                sqlx::raw_sql(logged(set)).execute(&mut *conn).await?;
+                Ok(())
+            })
+        }),
+        None => options,
+    }
+}
+
+/// The `timezone` connection option: how timestamptz values are rendered.
+fn session_time_zone(params: &ConnectParams) -> Option<String> {
+    params
+        .config
+        .options
+        .get("timezone")
+        .map(|z| z.trim().to_owned())
+        .filter(|z| !z.is_empty())
 }
 
 fn pg_options(params: &ConnectParams) -> Result<PgConnectOptions> {
@@ -134,16 +158,10 @@ fn pg_options(params: &ConnectParams) -> Result<PgConnectOptions> {
         // Prepared statements are only used to describe empty results and are
         // deallocated right away; nothing is cached, so nothing can go stale.
         .statement_cache_capacity(0);
-    let settings: Vec<(&str, &str)> = [
-        "search_path",
-        "timezone",
-        "statement_timeout",
-        "lock_timeout",
-        "role",
-    ]
-    .into_iter()
-    .filter_map(|k| cfg.options.get(k).map(|v| (k, v.as_str())))
-    .collect();
+    let settings: Vec<(&str, &str)> = ["search_path", "statement_timeout", "lock_timeout", "role"]
+        .into_iter()
+        .filter_map(|k| cfg.options.get(k).map(|v| (k, v.as_str())))
+        .collect();
     if !settings.is_empty() {
         o = o.options(settings);
     }
@@ -170,6 +188,8 @@ impl Db {
 
 struct PgDriver {
     options: PgConnectOptions,
+    /// Session time zone for every connection (the `timezone` option).
+    timezone: Option<String>,
     default_db: String,
     dbs: Mutex<HashMap<String, Arc<Db>>>,
     version: String,
@@ -557,7 +577,7 @@ impl PgDriver {
         }
         let options = self.options.clone().database(name);
         let db = Arc::new(Db::new(
-            pool_options(OTHER_DB_CONNECTIONS).connect_lazy_with(options),
+            pool_options(OTHER_DB_CONNECTIONS, self.timezone.clone()).connect_lazy_with(options),
         ));
         dbs.insert(name.to_owned(), db.clone());
         db
@@ -590,6 +610,10 @@ impl PgDriver {
         let db = self.db(database);
         let mut lease = self.lease(&db).await?;
         let kind = statement_kind(sql, DIALECT);
+        if kind == StatementKind::Ddl {
+            // The cached table structures may be about to go stale.
+            self.cache.clear();
+        }
         let state = Arc::new(CancelState::default());
         state.start();
         let cancel = Arc::new(PgCancel {
@@ -601,7 +625,10 @@ impl PgDriver {
             let cancel = cancel.clone();
             move || {
                 Box::pin(async move {
-                    let _ = cancel.cancel().await;
+                    // The connection is closed right after, so once is enough.
+                    if cancel.state.request() {
+                        let _ = cancel.fire().await;
+                    }
                 })
             }
         });
@@ -968,9 +995,22 @@ impl CancelHandle for PgCancel {
         if !self.state.request() {
             return Ok(());
         }
-        sqlx::raw_sql(logged(format!("SELECT pg_cancel_backend({})", self.pid)))
-            .execute(&self.pool)
-            .await?;
+        cancel_until_stopped(&self.state, || self.fire()).await
+    }
+}
+
+impl PgCancel {
+    /// One `pg_cancel_backend`.
+    async fn fire(&self) -> Result<()> {
+        // Only a backend that is running something is cancelled: a repeated cancel must
+        // not land on whatever the connection does next.
+        sqlx::raw_sql(logged(format!(
+            "SELECT pg_cancel_backend(pid) FROM pg_stat_activity \
+             WHERE pid = {} AND state = 'active' AND pid <> pg_backend_pid()",
+            self.pid
+        )))
+        .execute(&self.pool)
+        .await?;
         Ok(())
     }
 }
@@ -1058,11 +1098,12 @@ impl Driver for PgDriver {
         let mut request = request.clone();
         request.table = normalized(&request.table);
         let db = self.db(&request.table.database);
-        let key = if request.sort.is_empty() {
-            self.primary_key(&request.table).await?
-        } else {
-            Arc::new(Vec::new())
-        };
+        // The key orders unsorted pages and breaks ties between sorted ones; a table
+        // without one is tie-broken by its columns.
+        let mut key = self.primary_key(&request.table).await?;
+        if key.is_empty() && !request.sort.is_empty() {
+            key = Arc::new(tiebreak_columns(&*self.structure(&request.table).await?));
+        }
         let sql = select_sql(DIALECT, &request, &key, Some((limit, offset)))?;
         let rows = sqlx::raw_sql(logged(sql.clone()))
             .fetch_all(&db.pool)

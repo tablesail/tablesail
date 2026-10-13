@@ -241,6 +241,9 @@ enum Formatter {
         delimiter: u8,
         header: bool,
         null_as: String,
+        /// MySQL and SQLite store booleans as 0/1 and cannot read `true`/`false` back
+        /// (SQLite would keep the word as text), so those are written as numbers.
+        numeric_bools: bool,
     },
     Json {
         pretty: bool,
@@ -284,6 +287,7 @@ impl Formatter {
                     delimiter,
                     header: *header,
                     null_as: null_as.clone(),
+                    numeric_bools: matches!(dialect, Dialect::Mysql { .. } | Dialect::Sqlite),
                 }
             }
             ExportFormat::Json { pretty } => Formatter::Json {
@@ -356,12 +360,17 @@ impl Formatter {
     fn rows(&mut self, rows: &[Row], buf: &mut Vec<u8>) -> Result<()> {
         match self {
             Formatter::Csv {
-                delimiter, null_as, ..
+                delimiter,
+                null_as,
+                numeric_bools,
+                ..
             } => {
                 write_csv(*delimiter, buf, |w| {
                     for row in rows {
                         w.write_record(row.iter().map(|v| match v {
                             Value::Null => null_as.clone(),
+                            absent if is_absent(absent) => null_as.clone(),
+                            Value::Bool(b) if *numeric_bools => u8::from(*b).to_string(),
                             other => other.to_display(),
                         }))?;
                     }
@@ -453,11 +462,18 @@ where
     Ok(())
 }
 
+/// A MongoDB field the document does not have. Exports have fixed columns, so it
+/// is written like NULL rather than as the empty text it displays as.
+fn is_absent(value: &Value) -> bool {
+    matches!(value, Value::Other { type_name, .. } if type_name == "missing")
+}
+
 /// A value as plain JSON: numbers stay numbers, anything JavaScript cannot hold
 /// exactly (big integers, decimals) becomes a string, bytes become base64.
 fn write_value(buf: &mut Vec<u8>, value: &Value) {
     let result = match value {
         Value::Null => serde_json::to_writer(&mut *buf, &serde_json::Value::Null),
+        absent if is_absent(absent) => serde_json::to_writer(&mut *buf, &serde_json::Value::Null),
         Value::Bool(b) => serde_json::to_writer(&mut *buf, b),
         Value::Int(i) if (-JS_SAFE_INT..=JS_SAFE_INT).contains(i) => {
             serde_json::to_writer(&mut *buf, i)
@@ -822,11 +838,82 @@ mod tests {
         assert_eq!(
             text,
             "id;name;meta\n1;\"a,b \"\"q\"\"\";\"{\"\"k\"\":[1,2]}\"\n\
-             9007199254740993;NULL;1.50\ntrue;0xdead;2024-01-02 03:04:05\n"
+             9007199254740993;NULL;1.50\n1;0xdead;2024-01-02 03:04:05\n"
         );
         assert_eq!(done.rows, 3);
         assert_eq!(done.bytes, text.len() as u64);
         assert!(done.done && !done.cancelled && done.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn csv_booleans_are_numbers_where_the_database_stores_numbers() {
+        for (dialect, t, f) in [
+            (Dialect::Sqlite, "1", "0"),
+            (
+                Dialect::Mysql {
+                    backslash_escapes: true,
+                },
+                "1",
+                "0",
+            ),
+            (Dialect::Postgres, "true", "false"),
+        ] {
+            let format = ExportFormat::Csv {
+                delimiter: ',',
+                header: false,
+                null_as: String::new(),
+            };
+            let mut formatter = Formatter::new(&format, dialect).unwrap();
+            let mut buf = Vec::new();
+            formatter.begin(&[col("a"), col("b")], &mut buf).unwrap();
+            formatter
+                .rows(&[vec![Value::Bool(true), Value::Bool(false)]], &mut buf)
+                .unwrap();
+            assert_eq!(String::from_utf8(buf).unwrap(), format!("{t},{f}\n"));
+        }
+    }
+
+    #[tokio::test]
+    async fn absent_mongo_fields_export_like_null() {
+        let absent = Value::Other {
+            type_name: "missing".into(),
+            text: String::new(),
+        };
+        let cursor = || -> Box<dyn Cursor> {
+            Box::new(VecCursor::new(vec![
+                CursorEvent::Columns(vec![col("a"), col("b")]),
+                CursorEvent::Rows(vec![vec![absent.clone(), Value::Text(String::new())]]),
+            ]))
+        };
+        for (format, expected) in [
+            (
+                ExportFormat::JsonLines,
+                "{\"a\":null,\"b\":\"\"}\n".to_owned(),
+            ),
+            (
+                ExportFormat::Csv {
+                    delimiter: ',',
+                    header: false,
+                    null_as: "NULL".into(),
+                },
+                "NULL,\n".to_owned(),
+            ),
+        ] {
+            let formatter = Formatter::new(&format, Dialect::Mongo).unwrap();
+            let mut out = Vec::new();
+            let progress: ProgressFn = Arc::new(|_| {});
+            run_export(
+                cursor(),
+                formatter,
+                false,
+                &mut out,
+                progress,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+            assert_eq!(String::from_utf8(out).unwrap(), expected);
+        }
     }
 
     #[tokio::test]
