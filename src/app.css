@@ -1,12 +1,33 @@
 :root {
   --bg: #ffffff;
   --bg-sidebar: #f5f5f7;
+  --bg-elev: #ffffff;
+  --bg-hover: rgb(0 0 0 / 0.05);
+  --bg-input: #ffffff;
   --fg: #1d1d1f;
   --fg-muted: #6e6e73;
   --border: #d2d2d7;
   --accent: #0a66d8;
+  --accent-fg: #ffffff;
+  --selection: rgb(10 102 216 / 0.16);
+  --danger: #d93025;
+  --success: #1e8e3e;
+  --warning: #b06000;
+  --env-local: #2e9e4f;
+  --env-development: #2f7de1;
+  --env-staging: #e8820c;
+  --env-production: #d93025;
+  --syn-keyword: #a626a4;
+  --syn-string: #2a7f3b;
+  --syn-number: #b35900;
+  --syn-comment: #8a8f98;
+  --syn-type: #0e7c86;
+  --syn-name: #1d1d1f;
+  --syn-fn: #2f5bd8;
+  --syn-op: #6e6e73;
+  --mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
 
-  color-scheme: light dark;
+  color-scheme: light;
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   font-size: 13px;
   line-height: 1.4;
@@ -15,14 +36,65 @@
   -webkit-font-smoothing: antialiased;
 }
 
+:root[data-theme='dark'] {
+  --bg: #1e1e1e;
+  --bg-sidebar: #252526;
+  --bg-elev: #2a2a2c;
+  --bg-hover: rgb(255 255 255 / 0.07);
+  --bg-input: #2d2d30;
+  --fg: #e5e5e5;
+  --fg-muted: #9a9a9a;
+  --border: #3a3a3a;
+  --accent: #4c9aff;
+  --accent-fg: #0b1220;
+  --selection: rgb(76 154 255 / 0.25);
+  --danger: #f2665c;
+  --success: #52c26f;
+  --warning: #e9a23b;
+  --env-local: #3fb061;
+  --env-development: #4c9aff;
+  --env-staging: #f0932b;
+  --env-production: #e5483d;
+  --syn-keyword: #d68cf0;
+  --syn-string: #8fd18f;
+  --syn-number: #f0a35e;
+  --syn-comment: #7d838c;
+  --syn-type: #5fcad3;
+  --syn-name: #e5e5e5;
+  --syn-fn: #7fb2ff;
+  --syn-op: #9a9a9a;
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
     --bg: #1e1e1e;
     --bg-sidebar: #252526;
+    --bg-elev: #2a2a2c;
+    --bg-hover: rgb(255 255 255 / 0.07);
+    --bg-input: #2d2d30;
     --fg: #e5e5e5;
     --fg-muted: #9a9a9a;
     --border: #3a3a3a;
     --accent: #4c9aff;
+    --accent-fg: #0b1220;
+    --selection: rgb(76 154 255 / 0.25);
+    --danger: #f2665c;
+    --success: #52c26f;
+    --warning: #e9a23b;
+    --env-local: #3fb061;
+    --env-development: #4c9aff;
+    --env-staging: #f0932b;
+    --env-production: #e5483d;
+    --syn-keyword: #d68cf0;
+    --syn-string: #8fd18f;
+    --syn-number: #f0a35e;
+    --syn-comment: #7d838c;
+    --syn-type: #5fcad3;
+    --syn-name: #e5e5e5;
+    --syn-fn: #7fb2ff;
+    --syn-op: #9a9a9a;
+    color-scheme: dark;
   }
 }
 
@@ -42,4 +114,111 @@ body {
   user-select: none;
   -webkit-user-select: none;
   cursor: default;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input[type='text'],
+input[type='password'],
+input[type='number'],
+input[type='search'],
+input:not([type]),
+select,
+textarea {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  min-width: 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+button {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+button.primary:hover:not(:disabled) {
+  filter: brightness(1.1);
+  background: var(--accent);
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+button.ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-sidebar);
+}
+
+.error-text {
+  color: var(--danger);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.muted {
+  color: var(--fg-muted);
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
 }

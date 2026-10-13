@@ -1,58 +1,69 @@
 <script lang="ts">
-  import { invoke } from '@tauri-apps/api/core'
+  import { onMount } from 'svelte'
+  import Welcome from './lib/connections/Welcome.svelte'
+  import Workspace from './lib/shell/Workspace.svelte'
+  import ExportDialog from './lib/dialogs/ExportDialog.svelte'
+  import ImportDialog from './lib/dialogs/ImportDialog.svelte'
+  import AboutDialog from './lib/shell/AboutDialog.svelte'
+  import QuickOpen from './lib/shell/QuickOpen.svelte'
+  import ShortcutsHelp from './lib/shell/ShortcutsHelp.svelte'
+  import Toasts from './lib/shell/Toasts.svelte'
+  import { handleShortcut } from './lib/shell/shortcuts'
+  import { connections } from './lib/stores/connections.svelte'
+  import { sessions } from './lib/stores/sessions.svelte'
+  import { theme } from './lib/stores/theme.svelte'
+  import { ui } from './lib/stores/ui.svelte'
 
-  interface CoreInfo {
-    version: string
-    engines: string[]
+  theme.init()
+
+  onMount(() => {
+    void connections.load()
+  })
+
+  function onKeydown(e: KeyboardEvent) {
+    if (handleShortcut(e)) {
+      e.preventDefault()
+      e.stopPropagation()
+    }
   }
 
-  const info: Promise<CoreInfo> = invoke('app_info')
+  // The Tauri webview shows the browser context menu otherwise.
+  function onContextMenu(e: MouseEvent) {
+    const t = e.target as HTMLElement | null
+    if (!t?.closest('input, textarea, .cm-editor, [data-native-menu]')) e.preventDefault()
+  }
 </script>
 
-<main>
-  <aside></aside>
-  <section>
-    <footer>
-      {#await info}
-        <span>Connecting to core…</span>
-      {:then core}
-        <span>dbcore v{core.version}</span>
-        <span>{core.engines.join(' · ')}</span>
-      {:catch err}
-        <span class="error">Core unavailable: {String(err)}</span>
-      {/await}
-    </footer>
-  </section>
-</main>
+<svelte:window onkeydowncapture={onKeydown} oncontextmenu={onContextMenu} />
+
+<div class="app">
+  {#if sessions.view === 'connections' || !sessions.active}
+    <Welcome />
+  {/if}
+  <Workspace visible={sessions.view === 'workspace' && !!sessions.active} />
+</div>
+
+{#if ui.exportRequest}
+  {@const r = ui.exportRequest}
+  <ExportDialog session={r.session} source={r.source} name={r.name} onClose={() => (ui.exportRequest = null)} />
+{/if}
+{#if ui.importRequest}
+  {@const r = ui.importRequest}
+  <ImportDialog session={r.session} table={r.table} onClose={() => (ui.importRequest = null)} />
+{/if}
+{#if ui.quickOpen}
+  <QuickOpen onClose={() => (ui.quickOpen = false)} />
+{/if}
+{#if ui.shortcutsHelp}
+  <ShortcutsHelp onClose={() => (ui.shortcutsHelp = false)} />
+{/if}
+{#if ui.about}
+  <AboutDialog onClose={() => (ui.about = false)} />
+{/if}
+<Toasts />
 
 <style>
-  main {
-    display: grid;
-    grid-template-columns: 240px 1fr;
+  .app {
     height: 100%;
-  }
-
-  aside {
-    background: var(--bg-sidebar);
-    border-right: 1px solid var(--border);
-  }
-
-  section {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-  }
-
-  footer {
-    display: flex;
-    justify-content: space-between;
-    padding: 4px 10px;
-    border-top: 1px solid var(--border);
-    color: var(--fg-muted);
-    font-size: 11px;
-  }
-
-  .error {
-    color: #d93025;
   }
 </style>
