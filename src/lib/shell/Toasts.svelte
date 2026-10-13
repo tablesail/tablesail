@@ -13,7 +13,7 @@
   .toasts {
     position: fixed;
     right: 14px;
-    bottom: 34px;
+    bottom: 48px;
     z-index: 300;
     display: flex;
     flex-direction: column;

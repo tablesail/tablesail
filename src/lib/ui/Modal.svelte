@@ -8,6 +8,7 @@
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte'
+  import { dialogFocus } from './dialogFocus'
 
   interface Props {
     title: string
@@ -39,6 +40,7 @@
     aria-modal="true"
     aria-label={title}
     tabindex="-1"
+    use:dialogFocus
     onclick={(e) => e.stopPropagation()}
   >
     <header>{title}</header>

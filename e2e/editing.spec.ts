@@ -314,7 +314,6 @@ test.describe('typed editors', () => {
     // BUG: the first click of the double-click auto-opens the Details panel, which narrows the grid by 300px
     // while the second click is still on its way, so the double-click lands on another cell (or on nothing)
     // and the JSON editor never opens. Related to the "clicked cell stays in view" bug in grid.spec.ts.
-    test.fail()
     await openConnection(page)
     await openTableLoaded(page, 'big_table')
     await gridCell(page, 2, 6).dblclick()

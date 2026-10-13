@@ -316,7 +316,6 @@ test.describe('saved queries', () => {
     // BUG: Svelte's `autofocus` attribute only focuses when document.activeElement is <body>; here the Save
     // toolbar button still has focus, so the input stays unfocused and typing a name goes nowhere
     // (QueryTab.svelte save dialog; the same applies to every Modal opened from a focused control).
-    test.fail()
     await setSql(page, 'SELECT 1')
     await page.getByRole('button', { name: 'Save' }).click()
     await expect(dialog(page, 'Save query').getByPlaceholder('Revenue by month')).toBeFocused({ timeout: 1500 })
@@ -564,7 +563,6 @@ test.describe('production safety', () => {
   test('closing the production prompt gives the focus back to the editor', async ({ page }) => {
     // BUG: Modal.svelte neither traps nor restores focus. After Cancel the focus is on <body>, so the next
     // ⌘↩ is swallowed and the user has to click into the editor again.
-    test.fail()
     await openConnection(page, 'Production')
     await newQueryTab(page)
     await setSql(page, 'DROP TABLE customers')

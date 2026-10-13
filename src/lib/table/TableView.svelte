@@ -43,6 +43,7 @@
   import { pulse } from '../stores/pulse.svelte'
   import { tabs } from '../stores/tabs.svelte'
   import { load as loadSaved, save as saveSaved } from '../stores/persist'
+  import { dialogFocus } from '../ui/dialogFocus'
   import RowMenu from './RowMenu.svelte'
   import type { RowMenuItem } from './menu'
   import CellEditor from './editors/CellEditor.svelte'
@@ -183,9 +184,9 @@
       case 'pending':
         return 'Counting…'
       case 'exact':
-        return `${formatCount(total)} rows`
+        return `${formatCount(total)} ${total === 1 ? 'row' : 'rows'}`
       case 'estimate':
-        return `≈${formatCount(total)} rows`
+        return `≈${formatCount(total)} ${total === 1 ? 'row' : 'rows'}`
       default:
         return `${formatCount(loadedEnd)}+ rows`
     }
@@ -485,7 +486,11 @@
     void rev
     void store.version
     const sel = selection
-    if (!active || !tabId || tab !== 'data' || !sel || columns.length === 0) return
+    if (!active || !tabId || tab !== 'data' || columns.length === 0) return
+    if (!sel) {
+      untrack(() => inspector.unpublish(tabId))
+      return
+    }
     const row = getRow(sel.activeRow)
     if (!row) return
     inspector.show({
@@ -931,6 +936,11 @@
   )
 
   function onWindowKey(e: KeyboardEvent) {
+    if (active && columnsMenu && e.key === 'Escape') {
+      e.preventDefault()
+      columnsMenu = null
+      return
+    }
     if (!active || modalOpen) return
     const mod = e.metaKey || e.ctrlKey
     if (!mod || e.altKey) return
@@ -1106,7 +1116,7 @@
     </div>
 
     {#if tab === 'data'}
-      <button class="bb" disabled={!editable} title="Add a row" onclick={addRow}><Icon name="plus" size={12} strokeWidth={1.8} /> Row</button>
+      <button class="bb" disabled={!editable} title="Add a row" onclick={addRow}><Icon name="plus" size={12} strokeWidth={1.8} /><span class="lbl">Row</span></button>
       <button class="bb io" disabled={!editable || !selection} title="Delete selected rows (Delete)" aria-label="Delete selected rows" onclick={deleteSelected}><Icon name="trash" size={12} /></button>
     {/if}
 
@@ -1149,10 +1159,10 @@
         />
       </label>
       <button class="bb" class:on={showFilters || (appliedCount > 0 && !quick)} title="Filters (⌘F)" onclick={toggleFilters}>
-        <Icon name="filter" size={12} /> Filters{#if appliedCount > 0 && !quick}<span class="count">{appliedCount}</span>{/if}
+        <Icon name="filter" size={12} /><span class="lbl">Filters</span>{#if appliedCount > 0 && !quick}<span class="count">{appliedCount}</span>{/if}
       </button>
       <button class="bb" class:on={!!columnsMenu || hidden.length > 0} disabled={!structure} title="Show or hide columns" onclick={openColumnsMenu}>
-        <Icon name="columns" size={12} /> Columns{#if hidden.length > 0}<span class="count">{hidden.length}</span>{/if}
+        <Icon name="columns" size={12} /><span class="lbl">Columns</span>{#if hidden.length > 0}<span class="count">{hidden.length}</span>{/if}
       </button>
     {/if}
     <div class="grp">
@@ -1169,7 +1179,22 @@
   {@const pos = columnsMenu}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="pop-scrim" onclick={() => (columnsMenu = null)}></div>
-  <div class="colpop" style:right="{window.innerWidth - pos.x}px" style:bottom="{window.innerHeight - pos.y + 6}px" role="dialog" aria-label="Columns">
+  <div
+    class="colpop"
+    style:right="{window.innerWidth - pos.x}px"
+    style:bottom="{window.innerHeight - pos.y + 6}px"
+    role="dialog"
+    aria-label="Columns"
+    tabindex="-1"
+    use:dialogFocus
+    onkeydown={(e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        columnsMenu = null
+      }
+    }}
+  >
     <div class="colpop-head">
       <span>Columns</span>
       <button class="link" disabled={hidden.length === 0} onclick={() => setHidden([])}>Show all</button>
@@ -1371,6 +1396,7 @@
 
 
   .bottombar {
+    container: bottombar / inline-size;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1402,6 +1428,27 @@
     color: var(--accent-fg);
     font-weight: 600;
     box-shadow: none;
+  }
+
+  /* Narrow bars (details panel open, pending changes): icons only, then drop the quick filter. */
+  @container bottombar (max-width: 860px) {
+    .bb .lbl {
+      display: none;
+    }
+
+    .info .dim {
+      display: none;
+    }
+  }
+
+  @container bottombar (max-width: 700px) {
+    .quick {
+      display: none;
+    }
+
+    .pending-label {
+      display: none;
+    }
   }
 
   /* Bordered push button (TablePlus "+ Row", "Filters"). */

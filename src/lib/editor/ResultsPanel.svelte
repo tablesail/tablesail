@@ -79,9 +79,9 @@
     if (s.state === 'error' || s.state === 'cancelled') return STATE_LABEL[s.state]
     if (s.sets.length) {
       const n = s.sets.reduce((a, x) => a + x.loaded, 0)
-      return s.state === 'done' ? `${formatCount(n)} rows` : `${formatCount(n)}+ rows`
+      return s.state === 'done' ? `${formatCount(n)} ${n === 1 ? 'row' : 'rows'}` : `${formatCount(n)}+ rows`
     }
-    if (s.affected != null) return `${formatCount(s.affected)} rows affected`
+    if (s.affected != null) return `${formatCount(s.affected)} ${s.affected === 1 ? 'row' : 'rows'} affected`
     return STATE_LABEL[s.state]
   }
 
@@ -142,7 +142,7 @@
       </div>
       <div class="foot">
         <span>
-          {#if info.complete}{formatCount(info.loaded)} rows{:else}≥ {formatCount(info.loaded)} rows{/if}
+          {#if info.complete}{formatCount(info.loaded)} {info.loaded === 1 ? 'row' : 'rows'}{:else}≥ {formatCount(info.loaded)} rows{/if}
         </span>
         {#if info.truncated}
           <span class="warn">Showing the first {formatCount(info.loaded)} rows only (non-final statement of a script).</span>

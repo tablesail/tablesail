@@ -35,6 +35,9 @@
   }
 
   let sidebarWidth = $state(readWidth())
+  let windowWidth = $state(typeof window === 'undefined' ? 1400 : window.innerWidth)
+  /** Small windows get slimmer side panels (instead of hiding the details panel). */
+  let narrow = $derived(windowWidth < 1120)
 
   const LOG_KEY = 'tablesoft.consoleHeight'
   let logHeight = $state(readLogHeight())
@@ -94,12 +97,14 @@
   }
 </script>
 
+<svelte:window bind:innerWidth={windowWidth} />
+
 <div class="workspace" hidden={!visible || !session}>
   {#if session}
     <TopBar {session} />
     <div
       class="body"
-      style:grid-template-columns="{ui.sidebarHidden ? '0px 0px' : `${sidebarWidth}px 1px`} minmax(0, 1fr) {inspector.open ? '300px' : '0px'}"
+      style:grid-template-columns="{ui.sidebarHidden ? '0px 0px' : `${narrow ? Math.min(sidebarWidth, 200) : sidebarWidth}px 1px`} minmax(0, 1fr) {inspector.open ? (narrow ? '260px' : '300px') : '0px'}"
     >
       {#key session.sessionId}
         <div class="side"><Sidebar {session} /></div>
@@ -188,16 +193,6 @@
     grid-template-rows: minmax(0, 1fr);
     overflow: hidden;
     background: var(--bg-chrome);
-  }
-
-  @media (max-width: 1120px) {
-    .body {
-      grid-template-columns: 213px 1px minmax(0, 1fr) 0 !important;
-    }
-
-    .body > :global(.inspector) {
-      display: none;
-    }
   }
 
   .side {

@@ -317,19 +317,20 @@ test.describe('panels and toggles', () => {
     // leaves inspector.open true, so "Toggle details panel", the palette's "Toggle row inspector" and the
     // auto-open on row selection all silently do nothing: the Details panel (and its field editing) is
     // unreachable in a window between the 800px minimum and 1120px, with no hint why.
-    test.fail()
     await page.setViewportSize({ width: 1000, height: 700 })
     await page.getByRole('button', { name: 'Toggle details panel' }).click()
     await expect(inspector(page)).toBeVisible({ timeout: 1500 })
   })
 
-  test('the panel is hidden below 1120px wide so the grid keeps room', async ({ page }) => {
+  test('below 1120px wide the panel stays open but slimmer, so the grid keeps room', async ({ page }) => {
     await page.getByRole('button', { name: 'Toggle details panel' }).click()
     await expect(inspector(page)).toBeVisible()
+    const wide = (await inspector(page).boundingBox())!.width
     await page.setViewportSize({ width: 1000, height: 700 })
-    await expect(inspector(page)).toBeHidden()
-    await page.setViewportSize({ width: 1440, height: 900 })
     await expect(inspector(page)).toBeVisible()
+    await expect.poll(async () => (await inspector(page).boundingBox())!.width).toBeLessThan(wide)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect.poll(async () => (await inspector(page).boundingBox())!.width).toBe(wide)
   })
 })
 
@@ -501,7 +502,6 @@ test.describe('toolbar menu', () => {
 
   test('the Settings… item advertises ⌘, and the shortcut actually opens Settings', async ({ page }) => {
     // BUG: the menu hint says "⌘," but shortcuts.ts has no handler for it, and ShortcutsHelp does not list it.
-    test.fail()
     await openConnection(page)
     await page.keyboard.press(`${MOD}+,`)
     await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible()

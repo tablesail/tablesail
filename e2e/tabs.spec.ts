@@ -72,7 +72,6 @@ test.describe('table tabs', () => {
   test('the active tab is always visible inside the strip, however many tabs are open', async ({ page }) => {
     // BUG: .tab has min-width:110px and .strip scrolls with a hidden scrollbar, so from about the 11th tab on the
     // newly opened (active) tab sits beyond the right edge and nothing scrolls it into view (TabBar.svelte).
-    test.fail()
     const names = ['all_types', 'big_table', 'categories', 'composite_pk', 'computed', 'customers', 'empty_table', 'events', 'no_pk', 'orders', 'select', 'unique_only']
     for (const t of names) await openTable(page, t)
     const strip = await box(page.locator('.strip'))
@@ -220,7 +219,6 @@ test.describe('table tabs', () => {
     // BUG: "View related" (Details panel foreign-key button) opens a second tab for the same table with a filter,
     // but both tabs are titled "customers" with the tooltip "public.customers", so nothing in the strip says which
     // is filtered (tabs.svelte.ts openTable keeps title = table.name for filtered tabs).
-    test.fail()
     await openTableLoaded(page, 'customers')
     await openTableLoaded(page, 'orders')
     await gridCell(page, 0, 1).click()

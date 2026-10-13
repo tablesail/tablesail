@@ -695,7 +695,7 @@ describe('tabs: persistence', () => {
     settleSave()
     const data = storage.json<{ tabs: Record<string, unknown>[]; active: number }>(KEY('c1'))!
     expect(data.active).toBe(0)
-    expect(data.tabs[0]).toEqual({ kind: 'table', table: T('orders', 'sales'), title: 'orders', filters: f, preview: true })
+    expect(data.tabs[0]).toEqual({ kind: 'table', table: T('orders', 'sales'), title: 'orders (filtered)', filters: f, preview: true })
     expect(data.tabs[0]).not.toHaveProperty('id')
     expect(data.tabs[0]).not.toHaveProperty('sessionId')
   })

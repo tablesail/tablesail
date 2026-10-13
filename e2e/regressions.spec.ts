@@ -176,7 +176,6 @@ test.describe('Space after clicking a + / new-query button', () => {
     // BUG: a clicked toolbar button keeps focus, so the very next Space press (for instance the first space of
     // a query typed straight away) re-activates it: the sidebar flickers closed and open (TopBar.svelte
     // buttons do not blur / prevent focus on mousedown like TabBar's + does).
-    test.fail()
     await openConnection(page)
     await page.getByRole('button', { name: 'Toggle sidebar' }).click()
     await expect.poll(async () => (await sidebar(page).boundingBox())?.width ?? 0).toBeLessThan(2)
@@ -371,7 +370,6 @@ test.describe('toasts and the bottom bar', () => {
   test('a toast does not cover the table bottom bar', async ({ page }) => {
     // BUG: .toasts is positioned at bottom: 34px, but the table bottom bar is 38px tall, so every toast
     // overlaps the bar's right-hand buttons by about 4px (Toasts.svelte vs TableView.svelte .bottombar).
-    test.fail()
     await page.setViewportSize({ width: 1280, height: 720 })
     await openConnection(page)
     await openTableLoaded(page, 'customers')

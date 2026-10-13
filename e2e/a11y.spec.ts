@@ -265,7 +265,6 @@ test.describe('dialogs', () => {
   test('keep the keyboard focus inside while open (Tab does not escape to the page behind)', async ({ page }) => {
     // GAP: Modal.svelte has no focus trap. With Settings open, repeated Tab walks out of the dialog into the page
     // behind the backdrop (and into the window chrome in a real browser).
-    test.fail()
     await openConnection(page)
     await page.getByRole('button', { name: 'Menu' }).click()
     await page.getByRole('menuitem', { name: /Settings…/ }).click()
@@ -283,7 +282,6 @@ test.describe('dialogs', () => {
   test('move focus into the dialog when it opens', async ({ page }) => {
     // GAP: Modal.svelte never focuses anything; the trigger button keeps focus (see also the Save-query test in
     // sql-editor.spec.ts and the command palette tests in palette-settings.spec.ts).
-    test.fail()
     await openConnection(page)
     await page.getByRole('button', { name: 'Menu' }).click()
     await page.getByRole('menuitem', { name: /Settings…/ }).click()
@@ -389,7 +387,6 @@ test.describe('console hygiene', () => {
     // GAP: QueryTab.svelte mutates its `tab` prop (tab.sql / tab.database via bind:value on a plain prop and
     // `tab.title = name`), which Svelte reports as ownership_invalid_mutation in dev builds:
     // "Mutating unbound props (`tab`) is strongly discouraged. Consider using `bind:tab={...}`".
-    test.fail()
     const warnings: string[] = []
     page.on('console', (m) => {
       if (m.type() === 'warning' && m.text().includes('[svelte]')) warnings.push(m.text())

@@ -136,7 +136,7 @@ class TabsStore {
       kind: 'table',
       sessionId,
       table: { ...table },
-      title: table.name,
+      title: filters?.length ? `${table.name} (filtered)` : table.name,
       filters: filters?.length ? filters : undefined,
       preview: opts.preview || undefined,
     }
@@ -148,6 +148,12 @@ class TabsStore {
     else this.list.push(tab)
     this.select(tab.id)
     return tab
+  }
+
+  /** Updates a query tab's own fields (the tab objects belong to this store). */
+  updateQuery(id: string, patch: Partial<Pick<QueryTab, 'sql' | 'title' | 'database' | 'runOnOpen'>>) {
+    const tab = this.list.find((t) => t.id === id)
+    if (tab?.kind === 'query') Object.assign(tab, patch)
   }
 
   /** Turns a preview tab into a regular one. */

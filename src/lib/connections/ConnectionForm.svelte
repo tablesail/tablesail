@@ -123,6 +123,7 @@
   async function test() {
     const problem = validate()
     testResult = null
+    saveError = null
     testError = problem
     if (problem) return
     testing = true
@@ -137,6 +138,7 @@
 
   async function save() {
     const problem = validate()
+    testError = null
     if (problem) {
       saveError = problem
       return

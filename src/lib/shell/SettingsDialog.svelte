@@ -36,9 +36,10 @@
 
   async function removeKey() {
     keyBusy = true
+    const typed = apiKey
     try {
       await assistant.setKey('')
-      apiKey = ''
+      if (apiKey === typed) apiKey = ''
     } catch (e) {
       ui.toast(errorMessage(e), 'error')
     } finally {

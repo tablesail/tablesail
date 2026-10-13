@@ -262,7 +262,6 @@ test.describe('command palette focus', () => {
     // BUG: CommandPalette relies on the `autofocus` attribute, which Svelte only honours when <body> has focus.
     // With the grid focused the palette opens but the grid keeps the keyboard: typed text edits cells and
     // Escape (handled on the input only) cannot close the palette (CommandPalette.svelte).
-    test.fail()
     await openConnection(page)
     await openTableLoaded(page, 'customers')
     await gridCell(page, 0, 1).click()
@@ -273,7 +272,6 @@ test.describe('command palette focus', () => {
 
   test('⌘K from the SQL editor puts the cursor in the palette input', async ({ page }) => {
     // BUG: same cause as above, with the CodeMirror editor holding the focus.
-    test.fail()
     await openConnection(page)
     await newQueryTab(page)
     await page.keyboard.press(`${MOD}+k`)
@@ -284,7 +282,6 @@ test.describe('command palette focus', () => {
   test('Escape closes the palette wherever the focus is', async ({ page }) => {
     // BUG: Escape is only handled by the palette's own <input onkeydown>, so with focus elsewhere
     // (grid, editor, a button) the palette stays open and its backdrop blocks the whole window.
-    test.fail()
     await openConnection(page)
     await openTableLoaded(page, 'customers')
     await gridCell(page, 0, 1).click()

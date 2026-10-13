@@ -84,7 +84,7 @@
   )
 
   function openInspector(tab: 'details' | 'assistant') {
-    if (inspector.open && inspector.tab === tab) inspector.open = false
+    if ((inspector.open || inspector.opening) && inspector.tab === tab) inspector.close()
     else {
       inspector.tab = tab
       inspector.open = true
@@ -92,7 +92,16 @@
   }
 </script>
 
-<header class="toolbar" class:mac={isMac} class:prod={isProd} style:--env={session ? envColor(session.config) : 'var(--accent)'} data-tauri-drag-region>
+<!-- Toolbar buttons don't keep focus after a click (Space would toggle them again). -->
+<!-- svelte-ignore a11y_no_static_element_interactions -->
+<header
+  class="toolbar"
+  class:mac={isMac}
+  class:prod={isProd}
+  style:--env={session ? envColor(session.config) : 'var(--accent)'}
+  data-tauri-drag-region
+  onmousedown={(e) => (e.target as HTMLElement).closest('button') && e.preventDefault()}
+>
   {#if session}
     <div class="grp">
       <button class="tb" class:on={!ui.sidebarHidden} title="Toggle sidebar" aria-label="Toggle sidebar" onclick={() => (ui.sidebarHidden = !ui.sidebarHidden)}>

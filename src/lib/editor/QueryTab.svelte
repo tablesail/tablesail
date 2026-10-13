@@ -8,7 +8,7 @@
   import { QueryRunner } from './runner.svelte'
   import { api, errorMessage } from '../api'
   import { sessions } from '../stores/sessions.svelte'
-  import type { QueryTab } from '../stores/tabs.svelte'
+  import { tabs, type QueryTab } from '../stores/tabs.svelte'
   import { ui } from '../stores/ui.svelte'
   import { history } from '../stores/history.svelte'
   import { pulse } from '../stores/pulse.svelte'
@@ -84,7 +84,7 @@
   // Tabs opened with "Run" (assistant suggestions) execute once the editor exists.
   $effect(() => {
     if (tab.runOnOpen && editor && active) {
-      tab.runOnOpen = false
+      tabs.updateQuery(tab.id, { runOnOpen: false })
       void execute(true)
     }
   })
@@ -156,7 +156,7 @@
     if (!saving) return
     const name = saving.name.trim() || `Query ${new Date().toLocaleString()}`
     saved.add({ name, sql: editor?.getText() ?? tab.sql, connectionId: session.config.id, database: tab.database })
-    tab.title = name
+    tabs.updateQuery(tab.id, { title: name })
     saving = null
     ui.toast(`Saved “${name}”`, 'success')
   }
@@ -181,6 +181,8 @@
     ui.exportQuery(session, tab.database, sql)
   }
 
+  let failed = $derived(!runner.running && !!runner.status?.statements.some((s) => s.state === 'error'))
+
   let summary = $derived.by(() => {
     if (runner.running) return `Running… ${formatDuration(runner.elapsedMs)}`
     const st = runner.status
@@ -197,11 +199,11 @@
   <div class="toolbar">
     <div class="title"><Icon name="code" size={14} /> SQL Editor</div>
     <span class="meta">{ENGINE_LABEL[engine]} · {session.config.readOnly ? 'Read only' : session.config.env}</span>
-    <span class="status" class:err={!!notice || !!runner.runError}>{notice ?? summary}</span>
+    <span class="status" class:err={!!notice || !!runner.runError || failed}>{notice ?? summary}</span>
     <span class="spacer"></span>
     <label class="db" title="Database">
       <Icon name="database" size={13} />
-      <select bind:value={tab.database}>
+      <select value={tab.database} onchange={(e) => tabs.updateQuery(tab.id, { database: e.currentTarget.value })}>
         {#each session.databases as db (db)}
           <option value={db}>{db}</option>
         {/each}
@@ -229,7 +231,7 @@
       bind:this={editor}
       value={tab.sql}
       schema={schemaCfg}
-      onChange={(t) => (tab.sql = t)}
+      onChange={(t) => tabs.updateQuery(tab.id, { sql: t })}
       onRun={() => execute(false)}
       onRunAll={() => execute(true)}
       autofocus={active}
@@ -248,7 +250,12 @@
     <label class="save">
       <span class="muted">Name</span>
       <!-- svelte-ignore a11y_autofocus -->
-      <input type="text" bind:value={sv.name} placeholder="Revenue by month" autofocus onkeydown={(e) => e.key === 'Enter' && confirmSave()} />
+      <input type="text" bind:value={sv.name} placeholder="Revenue by month" autofocus onkeydown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            confirmSave()
+          }
+        }} />
     </label>
     {#snippet footer()}
       <button onclick={() => (saving = null)}>Cancel</button>

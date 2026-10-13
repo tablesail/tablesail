@@ -18,6 +18,16 @@
   let activeId = $derived(tabs.activeBySession[session.sessionId])
   let index = $derived(list.findIndex((t) => t.id === activeId))
 
+  let strip = $state<HTMLDivElement>()
+
+  // Keep the active tab visible when there are more tabs than fit.
+  $effect(() => {
+    const id = activeId
+    void list.length
+    const el = strip?.querySelector<HTMLElement>(`[data-tab="${CSS.escape(id ?? '')}"]`)
+    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  })
+
   function step(d: number) {
     const t = list[index + d]
     if (t) tabs.select(t.id)
@@ -40,11 +50,12 @@
       <Icon name="chevron-right" size={14} strokeWidth={1.6} />
     </button>
   </div>
-  <div class="strip" role="tablist">
+  <div class="strip" role="tablist" bind:this={strip}>
     {#each list as t (t.id)}
       <div
         class="tab"
         class:active={t.id === activeId}
+        data-tab={t.id}
         role="tab"
         aria-selected={t.id === activeId}
         tabindex="-1"

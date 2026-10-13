@@ -21,6 +21,9 @@ export interface InspectedRow {
   }
 }
 
+/** Longer than a double-click, so the second click still hits the cell it aimed at. */
+export const OPEN_DELAY_MS = 350
+
 class InspectorStore {
   open = $state(false)
   /** Which page of the right panel is showing. */
@@ -28,16 +31,31 @@ class InspectorStore {
   current = $state<InspectedRow | null>(null)
   /** Last row each tab published, so only picking a different row reopens the panel. */
   private lastRow = new Map<string, number>()
+  private openTimer: ReturnType<typeof setTimeout> | undefined
+  /** A row click scheduled the panel to open (it counts as open for the toggle). */
+  opening = $state(false)
 
   show(row: InspectedRow) {
     this.current = row
     if (this.lastRow.get(row.tabId) === row.rowIndex) return
     this.lastRow.set(row.tabId, row.rowIndex)
-    // Like TablePlus: selecting a row brings up its details.
+    // Like TablePlus: selecting a row brings up its details. Opening narrows the grid, so wait
+    // until a double-click on the same cell has had time to land where the user aimed.
     if (!this.open) {
-      this.tab = 'details'
-      this.open = true
+      clearTimeout(this.openTimer)
+      this.opening = true
+      this.openTimer = setTimeout(() => {
+        this.opening = false
+        if (this.open) return
+        this.tab = 'details'
+        this.open = true
+      }, OPEN_DELAY_MS)
     }
+  }
+
+  /** The tab no longer has a selected row (e.g. after Discard): stop showing its old values. */
+  unpublish(tabId: string) {
+    if (this.current?.tabId === tabId) this.current = null
   }
 
   clear(tabId: string) {
@@ -45,8 +63,16 @@ class InspectorStore {
     if (this.current?.tabId === tabId) this.current = null
   }
 
+  /** Closes the panel, including one that is about to open after a row click. */
+  close() {
+    clearTimeout(this.openTimer)
+    this.opening = false
+    this.open = false
+  }
+
   toggle() {
-    this.open = !this.open
+    if (this.open) this.close()
+    else this.open = true
   }
 }
 

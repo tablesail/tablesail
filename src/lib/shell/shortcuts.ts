@@ -31,6 +31,10 @@ export function handleShortcut(e: KeyboardEvent): boolean {
     theme.toggle()
     return true
   }
+  if (key === ',') {
+    ui.settings = true
+    return true
+  }
   if (key === '/' || key === '?') {
     ui.shortcutsHelp = !ui.shortcutsHelp
     return true

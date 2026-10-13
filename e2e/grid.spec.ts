@@ -23,7 +23,7 @@ import type { Page } from '@playwright/test'
 
 const toggleDetails = (page: Page) => page.getByRole('button', { name: 'Toggle details panel' })
 const quick = (page: Page) => bottomBar(page).getByPlaceholder('Filter rows…')
-const count = (page: Page) => bottomBar(page).getByText(/^(≈|)[\d,]+\+? rows$/)
+const count = (page: Page) => bottomBar(page).getByText(/^(≈|)[\d,]+\+? rows?$/)
 
 /** Text of the first cell of the active row (the id column in every sample table). */
 async function activeId(page: Page): Promise<string> {
@@ -105,7 +105,6 @@ test.describe('grid basics', () => {
 
   test('a single row is "1 row", not "1 rows"', async ({ page }) => {
     // BUG: TableView.svelte countText is `${n} rows` unconditionally, so a one-row result reads "1 rows".
-    test.fail()
     await openTableLoaded(page, 'customers')
     await quick(page).fill('Bob')
     await quick(page).press('Enter')
@@ -217,7 +216,7 @@ test.describe('row selection and the Details panel', () => {
     const related = inspector(page).getByRole('button', { name: /customer_id/ })
     await expect(related).toContainText('→ customers')
     await related.click()
-    await expect(tabNamed(page, 'customers')).toHaveCount(2) // the plain tab and the filtered one
+    await expect(tabNamed(page, 'customers (filtered)')).toHaveCount(1)
     await expect(page.getByText(/customers\b/).first()).toBeVisible()
   })
 })
@@ -440,7 +439,7 @@ test.describe('copy', () => {
   test('Filter by this value from the cell menu filters the table', async ({ page }) => {
     await gridCell(page, 1, 2).click({ button: 'right' })
     await page.getByRole('menuitem', { name: /Filter by this value/ }).click()
-    await expect(count(page)).toContainText('1 rows')
+    await expect(count(page)).toContainText('1 row')
     await expect.poll(() => columnTexts(page, 2)).toEqual(['Bob'])
     await expect(bottomBar(page).getByRole('button', { name: /Filters/ })).toContainText('1')
   })
@@ -547,7 +546,7 @@ test.describe('quick filter', () => {
   test('Enter applies a text filter across text columns, clearing the box restores every row', async ({ page }) => {
     await quick(page).fill('bob')
     await quick(page).press('Enter')
-    await expect(count(page)).toContainText('1 rows')
+    await expect(count(page)).toContainText('1 row')
     await expect.poll(() => columnTexts(page, 2)).toEqual(['Bob'])
 
     await quick(page).fill('')
@@ -606,7 +605,7 @@ test.describe('filters bar', () => {
     await bar(page).getByRole('combobox', { name: 'Operator' }).selectOption('contains')
     await bar(page).getByPlaceholder('value').fill('ali')
     await bar(page).getByRole('button', { name: 'Apply' }).click()
-    await expect(count(page)).toContainText('1 rows')
+    await expect(count(page)).toContainText('1 row')
     await expect.poll(() => columnTexts(page, 2)).toEqual(['Alice'])
     await expect(filtersButton(page).locator('.count')).toHaveText('1')
   })
@@ -618,7 +617,7 @@ test.describe('filters bar', () => {
     await bar(page).getByPlaceholder('value').fill('b@')
     await expect(count(page)).toContainText('2 rows')
     await bar(page).getByPlaceholder('value').press('Enter')
-    await expect(count(page)).toContainText('1 rows')
+    await expect(count(page)).toContainText('1 row')
   })
 
   test('operators without a value (is NULL) hide the value box', async ({ page }) => {
@@ -650,7 +649,7 @@ test.describe('filters bar', () => {
     await bar(page).getByRole('combobox', { name: 'Column' }).selectOption('name')
     await bar(page).getByPlaceholder('value').fill('Bob')
     await bar(page).getByRole('button', { name: 'Apply' }).click()
-    await expect(count(page)).toContainText('1 rows')
+    await expect(count(page)).toContainText('1 row')
 
     await bar(page).getByRole('button', { name: 'Clear' }).click()
     await expect(count(page)).toContainText('2 rows')
@@ -800,7 +799,6 @@ test.describe('columns button (hide columns)', () => {
 
   test('Escape closes the popover', async ({ page }) => {
     // BUG: the Columns popover (role=dialog) has no Escape handling or focus management (TableView.svelte .colpop).
-    test.fail()
     await columnsButton(page).click()
     await expect(popover(page)).toBeVisible()
     await page.keyboard.press('Escape')
@@ -828,7 +826,6 @@ test.describe('huge tables (virtual scrolling)', () => {
     // re-run ensureVisible for the selected cell, so a cell near the right edge is pushed out of view
     // (DataGrid.svelte: no scroll-into-view on resize). Pressing End right after that click has the same
     // problem: it selects the last column without scrolling to it.
-    test.fail()
     await page.setViewportSize({ width: 1200, height: 800 })
     const target = gridCell(page, 0, 5) // created_at: visible while the panel is closed
     await target.click()

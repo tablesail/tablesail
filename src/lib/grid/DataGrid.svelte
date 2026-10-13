@@ -207,6 +207,16 @@
     scrollLeft = scroller.scrollLeft
   }
 
+  // When the grid gets narrower (e.g. the details panel opens), keep the active cell in view.
+  let lastWidth = 0
+  $effect(() => {
+    const w = clientW
+    const narrowed = lastWidth > 0 && w < lastWidth
+    lastWidth = w
+    const sel = untrack(() => selection)
+    if (narrowed && sel) untrack(() => ensureVisible(sel.activeRow, sel.activeCol))
+  })
+
   // Rows the parent should have loaded.
   const needStart = $derived(Math.max(0, firstVisible - NEED_OVERSCAN))
   const needEnd = $derived(

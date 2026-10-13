@@ -4,6 +4,7 @@
 -->
 <script lang="ts">
   import Icon, { type IconName } from '../ui/Icon.svelte'
+  import { dialogFocus } from '../ui/dialogFocus'
   import { inspector } from '../stores/inspector.svelte'
   import { saved } from '../stores/saved.svelte'
   import { sessions } from '../stores/sessions.svelte'
@@ -122,7 +123,22 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="overlay" onclick={onClose}>
-  <div class="palette" role="dialog" aria-label="Command palette" tabindex="-1" onclick={(e) => e.stopPropagation()}>
+  <div
+    class="palette"
+    role="dialog"
+    aria-label="Command palette"
+    tabindex="-1"
+    use:dialogFocus
+    onclick={(e) => e.stopPropagation()}
+    onkeydown={(e) => {
+      // Escape from anywhere in the palette (not only the input) closes it.
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        onClose()
+      }
+    }}
+  >
     <div class="input">
       <Icon name="search" size={18} />
       <!-- svelte-ignore a11y_autofocus -->

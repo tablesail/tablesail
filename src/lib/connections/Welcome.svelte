@@ -143,7 +143,10 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
-    if (form || prompt || confirmDelete || menu) return
+    // Keys already handled elsewhere (palette, dialogs, text fields) are not ours.
+    if (form || prompt || confirmDelete || menu || ui.palette || e.defaultPrevented) return
+    const t = e.target as HTMLElement | null
+    if (t !== searchEl && t?.closest('input, textarea, select, [role="dialog"]')) return
     const i = flat.findIndex((c) => c.id === selectedId)
     if (e.key === 'ArrowDown') {
       e.preventDefault()

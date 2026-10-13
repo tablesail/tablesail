@@ -237,7 +237,6 @@ test.describe('new connection form', () => {
   test('a validation problem is shown once, not once per button pressed', async ({ page }) => {
     // BUG: Save and then Test each set their own notice and neither clears the other, so the
     // same "Host is required." message appears twice (ConnectionForm.svelte: saveError / testError).
-    test.fail()
     const form = await openForm(page)
     await form.getByRole('textbox', { name: 'Host', exact: true }).fill('')
     await form.getByRole('button', { name: 'Save' }).click()
@@ -337,7 +336,6 @@ test.describe('new connection form', () => {
   test('the first field is focused when the dialog opens', async ({ page }) => {
     // BUG: Modal.svelte never moves focus into the dialog, so typing right after opening goes
     // nowhere (expected: the Name field has focus and receives the keystrokes).
-    test.fail()
     const form = await openForm(page)
     // Typing right away should land in the form, not behind it.
     await page.keyboard.type('typed without clicking')
