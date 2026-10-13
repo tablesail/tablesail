@@ -1,5 +1,6 @@
 <!-- A SQL editor tab: editor on top, results below, resizable split. -->
 <script lang="ts">
+  import Icon from '../ui/Icon.svelte'
   import { onDestroy } from 'svelte'
   import Modal from '../ui/Modal.svelte'
   import ResultsPanel from './ResultsPanel.svelte'
@@ -138,17 +139,18 @@
 
 <div class="query" bind:this={container}>
   <div class="toolbar">
-    <button class="primary" onclick={() => execute(false)} disabled={runner.running} title="{modLabel}+Enter">
-      ▶ Run
-    </button>
-    <button onclick={() => execute(true)} disabled={runner.running} title="Shift+{modLabel}+Enter">Run all</button>
     {#if runner.running}
-      <button class="danger" onclick={() => runner.cancel()}>Cancel</button>
+      <button class="danger" onclick={() => runner.cancel()} title="Cancel the running query"><Icon name="stop" size={11} strokeWidth={2} /> Stop</button>
+    {:else}
+      <button class="primary" onclick={() => execute(false)} title="Run the statement under the cursor ({modLabel}↵)">
+        <Icon name="play" size={11} strokeWidth={2} /> Run
+      </button>
     {/if}
+    <button class="tool" onclick={() => execute(true)} disabled={runner.running} title="Run the whole script (⇧{modLabel}↵)"><Icon name="play-all" size={13} /> Run all</button>
     <span class="status" class:err={!!notice || !!runner.runError}>{notice ?? summary}</span>
     <span class="spacer"></span>
-    <label class="db">
-      <span class="muted">Database</span>
+    <label class="db" title="Database">
+      <Icon name="database" size={13} />
       <select bind:value={tab.database}>
         {#each session.databases as db (db)}
           <option value={db}>{db}</option>
@@ -168,6 +170,7 @@
       onChange={(t) => (tab.sql = t)}
       onRun={() => execute(false)}
       onRunAll={() => execute(true)}
+      autofocus={active}
     />
   </div>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -206,10 +209,22 @@
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 5px 8px;
+    gap: 6px;
+    height: 40px;
+    padding: 0 8px;
     border-bottom: 1px solid var(--border);
     flex: none;
+  }
+
+  .tool {
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: var(--fg-muted);
+  }
+
+  .tool:hover:not(:disabled) {
+    color: var(--fg);
   }
 
   .status {
@@ -233,6 +248,11 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    color: var(--fg-muted);
+  }
+
+  .db select {
+    color: var(--fg);
   }
 
   .pane {
@@ -245,14 +265,20 @@
   }
 
   .split {
-    height: 5px;
-    margin: -2px 0;
+    height: 1px;
     cursor: row-resize;
     background: var(--border);
     flex: none;
     position: relative;
     z-index: 2;
     touch-action: none;
+  }
+
+  /* Taller invisible grab area around the 1px divider. */
+  .split::after {
+    content: '';
+    position: absolute;
+    inset: -4px 0;
   }
 
   .split:hover {

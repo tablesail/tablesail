@@ -6,7 +6,6 @@
   import Sidebar from '../sidebar/Sidebar.svelte'
   import QueryTab from '../editor/QueryTab.svelte'
   import TableView from '../table/TableView.svelte'
-  import StatusBar from './StatusBar.svelte'
   import TabBar from './TabBar.svelte'
   import TopBar from './TopBar.svelte'
   import { sessions } from '../stores/sessions.svelte'
@@ -60,7 +59,7 @@
 <div class="workspace" hidden={!visible || !session}>
   {#if session}
     <TopBar {session} />
-    <div class="body" style:grid-template-columns="{sidebarWidth}px 4px 1fr">
+    <div class="body" style:grid-template-columns="{sidebarWidth}px 1px 1fr">
       {#key session.sessionId}
         <Sidebar {session} />
       {/key}
@@ -90,20 +89,31 @@
           {/each}
           {#if sessionTabs.length === 0}
             <div class="empty">
-              <p>Open a table from the sidebar, or start a query.</p>
-              <button
-                class="primary"
-                onclick={() => tabs.newQuery(session.sessionId, sessions.database(session.sessionId))}
-              >
-                New query ({modLabel}+T)
-              </button>
-              <p class="muted">{modLabel}+P jumps to any table.</p>
+              <div class="hint">
+                <h2>{session.config.name}</h2>
+                <p class="muted">Pick a table in the sidebar, or start a query.</p>
+                <button
+                  class="primary"
+                  onclick={() => tabs.newQuery(session.sessionId, sessions.database(session.sessionId))}
+                >
+                  New query
+                </button>
+                <dl>
+                  <dt><kbd>{modLabel}</kbd><kbd>T</kbd></dt>
+                  <dd>New query</dd>
+                  <dt><kbd>{modLabel}</kbd><kbd>P</kbd></dt>
+                  <dd>Open any table</dd>
+                  <dt><kbd>{modLabel}</kbd><kbd>K</kbd></dt>
+                  <dd>Switch connection</dd>
+                  <dt><kbd>{modLabel}</kbd><kbd>/</kbd></dt>
+                  <dd>All shortcuts</dd>
+                </dl>
+              </div>
             </div>
           {/if}
         </div>
       </section>
     </div>
-    <StatusBar {session} />
   {/if}
 </div>
 
@@ -125,9 +135,18 @@
   }
 
   .resize {
+    position: relative;
     cursor: col-resize;
     background: var(--border);
     touch-action: none;
+    z-index: 2;
+  }
+
+  /* Wider invisible grab area around the 1px divider. */
+  .resize::after {
+    content: '';
+    position: absolute;
+    inset: 0 -4px;
   }
 
   .resize:hover {
@@ -166,9 +185,46 @@
   .empty {
     height: 100%;
     display: flex;
-    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+  }
+
+  .hint {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    text-align: center;
+  }
+
+  .hint h2 {
+    margin: 0;
+    font-size: 17px;
+    font-weight: 600;
+  }
+
+  .hint p {
+    margin: 0;
+  }
+
+  .hint dl {
+    display: grid;
+    grid-template-columns: auto auto;
+    gap: 8px 12px;
+    margin: 18px 0 0;
+    align-items: center;
+    color: var(--fg-muted);
+    font-size: 12px;
+  }
+
+  .hint dt {
+    display: flex;
+    gap: 3px;
+    justify-content: flex-end;
+  }
+
+  .hint dd {
+    margin: 0;
+    text-align: left;
   }
 </style>

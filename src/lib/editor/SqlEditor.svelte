@@ -9,9 +9,11 @@
     onChange: (text: string) => void
     onRun: () => void
     onRunAll: () => void
+    /** Focus the editor as soon as it has loaded. */
+    autofocus?: boolean
   }
 
-  let { value, schema, onChange, onRun, onRunAll }: Props = $props()
+  let { value, schema, onChange, onRun, onRunAll, autofocus = false }: Props = $props()
 
   let host = $state<HTMLDivElement>()
   let handle: EditorHandle | null = null
@@ -30,6 +32,7 @@
         onRunAll: () => onRunAll(),
       })
       loading = false
+      if (autofocus) handle.focus()
     })
     return () => {
       disposed = true

@@ -1,5 +1,6 @@
 <!-- Create / edit a saved connection. Secrets are sent to the keychain and never stored in the config. -->
 <script lang="ts">
+  import EngineBadge from '../ui/EngineBadge.svelte'
   import Modal from '../ui/Modal.svelte'
   import FilePick from './FilePick.svelte'
   import SshFields from './SshFields.svelte'
@@ -165,24 +166,30 @@
 
 <Modal title={initial ? 'Edit connection' : 'New connection'} {onClose} width="560px" dismissable={!saving}>
   <div class="form">
-    <div class="row two">
-      <label>
-        Name
-        <input type="text" bind:value={cfg.name} placeholder="My database" />
-      </label>
-      <label>
-        Engine
-        <select value={cfg.engine} onchange={(e) => changeEngine(e.currentTarget.value as Engine)}>
-          {#each engines as eng (eng)}
-            <option value={eng}>{ENGINE_LABEL[eng]}</option>
-          {/each}
-        </select>
-      </label>
+    <div class="engines" role="radiogroup" aria-label="Engine">
+      {#each engines as eng (eng)}
+        <button
+          type="button"
+          class="engine"
+          class:on={cfg.engine === eng}
+          role="radio"
+          aria-checked={cfg.engine === eng}
+          onclick={() => changeEngine(eng)}
+        >
+          <EngineBadge engine={eng} size={28} />
+          <span>{ENGINE_LABEL[eng]}</span>
+        </button>
+      {/each}
     </div>
+
+    <label>
+      <span class="lbl">Name</span>
+      <input type="text" bind:value={cfg.name} placeholder="My database" />
+    </label>
 
     {#if isSqlite}
       <div class="field">
-        Database file
+        <span class="lbl">Database file</span>
         <FilePick
           bind:value={cfg.filePath}
           placeholder="/path/to/database.db"
@@ -193,27 +200,27 @@
     {:else}
       {#if isMongo}
         <label>
-          Connection URL <span class="opt">optional, overrides host and port</span>
+          <span class="lbl">Connection URL <span class="opt">optional, overrides host and port</span></span>
           <input type="text" bind:value={cfg.url} placeholder="mongodb://host:27017/?replicaSet=rs0" />
         </label>
       {/if}
       <div class="row hostport">
         <label>
-          Host
+          <span class="lbl">Host</span>
           <input type="text" bind:value={cfg.host} placeholder="127.0.0.1" />
         </label>
         <label>
-          Port
+          <span class="lbl">Port</span>
           <input type="number" min="1" max="65535" bind:value={cfg.port} />
         </label>
       </div>
       <div class="row two">
         <label>
-          User
+          <span class="lbl">User</span>
           <input type="text" bind:value={cfg.user} autocomplete="off" />
         </label>
         <label>
-          Password
+          <span class="lbl">Password</span>
           <input
             type="password"
             bind:value={dbPassword}
@@ -223,22 +230,29 @@
         </label>
       </div>
       <label>
-        Database <span class="opt">optional</span>
+        <span class="lbl">Database <span class="opt">optional</span></span>
         <input type="text" bind:value={cfg.database} />
       </label>
     {/if}
 
     <div class="row two">
-      <label>
-        Environment
-        <select bind:value={cfg.env}>
-          {#each ENV_TAGS as tag (tag)}
-            <option value={tag}>{tag[0].toUpperCase() + tag.slice(1)}</option>
-          {/each}
-        </select>
-      </label>
       <div class="field">
-        Color
+        <span class="lbl">Environment</span>
+        <div class="seg envs" role="radiogroup" aria-label="Environment">
+          {#each ENV_TAGS as tag (tag)}
+            <button
+              type="button"
+              class:on={cfg.env === tag}
+              role="radio"
+              aria-checked={cfg.env === tag}
+              onclick={() => (cfg.env = tag)}
+              ><span class="env-dot" style:background="var(--env-{tag})"></span>{tag === 'development' ? 'Dev' : tag[0].toUpperCase() + tag.slice(1)}</button
+            >
+          {/each}
+        </div>
+      </div>
+      <div class="field">
+        <span class="lbl">Colour</span>
         <div class="color">
           <label class="inline">
             <input type="checkbox" bind:checked={customColor} /> Custom
@@ -255,7 +269,7 @@
 
     {#if !isSqlite}
       <details open={cfg.ssl.mode !== 'prefer' && cfg.ssl.mode !== 'disable'}>
-        <summary>SSL</summary>
+        <summary>SSL <span class="opt">{cfg.ssl.mode}</span></summary>
         <div class="section">
           <label>
             Mode
@@ -283,7 +297,7 @@
       </details>
 
       <details open={useSsh}>
-        <summary>SSH tunnel</summary>
+        <summary>SSH tunnel {#if useSsh && cfg.ssh}<span class="opt">via {cfg.ssh.host || '…'}</span>{/if}</summary>
         <div class="section">
           <label class="inline">
             <input type="checkbox" checked={useSsh} onchange={(e) => toggleSsh(e.currentTarget.checked)} />
@@ -336,9 +350,54 @@
   .field {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
+  }
+
+  .lbl {
     color: var(--fg-muted);
-    font-size: 12px;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+
+  .engines {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin-bottom: 2px;
+  }
+
+  .engine {
+    flex-direction: column;
+    gap: 5px;
+    padding: 9px 4px 7px;
+    min-height: 0;
+    border-radius: 9px;
+    font-size: 11.5px;
+    color: var(--fg-muted);
+    box-shadow: none;
+    border-color: var(--border);
+    background: transparent;
+  }
+
+  .engine.on {
+    color: var(--fg);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .envs {
+    align-self: flex-start;
+  }
+
+  .envs button {
+    gap: 5px;
+  }
+
+  .env-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
   }
 
   label.inline {
@@ -363,7 +422,9 @@
   }
 
   .opt {
-    opacity: 0.7;
+    margin-left: 4px;
+    font-weight: 400;
+    color: var(--fg-faint);
   }
 
   .color {
@@ -374,29 +435,54 @@
   }
 
   input[type='color'] {
-    width: 40px;
-    height: 24px;
+    width: 34px;
+    height: 22px;
     padding: 0;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
+    border-radius: 5px;
     background: none;
   }
 
   details {
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 10px;
+    border-radius: 8px;
+    padding: 0 12px;
+    background: var(--bg-alt);
   }
 
   summary {
-    cursor: pointer;
-    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 34px;
+    font-weight: 500;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  summary::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid var(--fg-muted);
+    border-bottom: 1.5px solid var(--fg-muted);
+    transform: rotate(-45deg);
+    transition: transform 0.12s;
+    margin-right: 4px;
+  }
+
+  details[open] summary::before {
+    transform: rotate(45deg);
   }
 
   .section {
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 10px 0 4px;
+    padding: 2px 0 12px;
   }
 
   .jump {

@@ -53,7 +53,8 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    background: rgb(0 0 0 / 0.35);
+    background: rgb(0 0 0 / 0.28);
+    backdrop-filter: blur(1.5px);
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -68,21 +69,21 @@
     flex-direction: column;
     background: var(--bg);
     color: var(--fg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: 0 12px 40px rgb(0 0 0 / 0.3);
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
     user-select: text;
     -webkit-user-select: text;
   }
 
   header {
-    padding: 10px 14px;
+    padding: 13px 16px 11px;
+    font-size: 14px;
     font-weight: 600;
-    border-bottom: 1px solid var(--border);
   }
 
   .body {
-    padding: 12px 14px;
+    padding: 4px 16px 14px;
     overflow: auto;
   }
 
@@ -90,7 +91,8 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 10px 16px;
     border-top: 1px solid var(--border);
+    background: var(--bg-chrome);
   }
 </style>

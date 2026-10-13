@@ -19,6 +19,11 @@ document.addEventListener(
   true,
 )
 
+// In a plain browser during development, stand in for the Tauri runtime with sample data.
+if (import.meta.env.DEV && !('__TAURI_INTERNALS__' in window)) {
+  await import('./dev/mockTauri')
+}
+
 const app = mount(App, {
   target: document.getElementById('app')!,
 })

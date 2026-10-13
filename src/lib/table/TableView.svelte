@@ -5,6 +5,7 @@
   only handled while `active` is true.
 -->
 <script lang="ts">
+  import Icon from '../ui/Icon.svelte'
   import { onDestroy, tick, untrack } from 'svelte'
   import { api, errorMessage, isCoreError } from '../api'
   import type {
@@ -915,33 +916,43 @@
     </div>
 
     {#if tab === 'data'}
-      <button class="ghost" title="Refresh (⌘R)" onclick={refresh}>Refresh</button>
-      <button class="ghost" class:on={showFilters || appliedCount > 0} title="Filter (⌘F)" onclick={toggleFilters}>
-        Filter{appliedCount > 0 ? ` (${appliedCount})` : ''}
+      <span class="sep"></span>
+      <button class="icon" title="Refresh (⌘R)" aria-label="Refresh" onclick={refresh}><Icon name="refresh" /></button>
+      <button class="tool" class:on={showFilters || appliedCount > 0} title="Filter (⌘F)" onclick={toggleFilters}>
+        <Icon name="filter" size={13} /> Filter{#if appliedCount > 0}<span class="count">{appliedCount}</span>{/if}
       </button>
       <span class="sep"></span>
-      <button class="ghost" disabled={!editable} title="Add a row" onclick={addRow}>+ Row</button>
+      <button class="tool" disabled={!editable} title="Add a row" onclick={addRow}><Icon name="plus" size={13} /> Row</button>
       <button
-        class="ghost"
+        class="icon"
         disabled={!editable || !selection}
         title="Delete the selected rows (Delete)"
-        onclick={deleteSelected}>Delete</button
+        aria-label="Delete selected rows"
+        onclick={deleteSelected}><Icon name="trash" /></button
       >
-      <span class="sep"></span>
-      <button class="ghost" disabled={store.isEmpty} onclick={previewSql}>Preview SQL</button>
-      <button class="ghost" disabled={store.isEmpty || committing} onclick={discard}>Discard</button>
-      <button class="primary" disabled={store.isEmpty || committing || !structure} title="Commit (⌘S)" onclick={requestCommit}>
-        {committing ? 'Committing…' : store.isEmpty ? 'Commit' : `Commit (${store.pending})`}
-      </button>
     {/if}
 
     <span class="grow"></span>
-    <button class="ghost" disabled={!onExport} onclick={() => onExport?.(request)}>Export</button>
-    <button class="ghost" disabled={importDisabled} onclick={() => onImport?.(table)}>Import</button>
+
+    {#if tab === 'data' && !store.isEmpty}
+      <div class="changes">
+        <span class="pending-dot"></span>
+        <span class="pending-label">{store.pending} change{store.pending === 1 ? '' : 's'}</span>
+        <button class="ghost" onclick={previewSql}>Preview SQL</button>
+        <button class="ghost" disabled={committing} onclick={discard}>Discard</button>
+        <button class="primary" disabled={committing || !structure} title="Commit (⌘S)" onclick={requestCommit}>
+          {committing ? 'Committing…' : 'Commit'}
+        </button>
+      </div>
+      <span class="sep"></span>
+    {/if}
+
+    <button class="icon" disabled={!onExport} title="Export…" aria-label="Export" onclick={() => onExport?.(request)}><Icon name="export" /></button>
+    <button class="icon" disabled={importDisabled} title="Import CSV…" aria-label="Import CSV" onclick={() => onImport?.(table)}><Icon name="import" /></button>
   </div>
 
   {#if readOnlyReason && tab === 'data'}
-    <div class="banner info">Read-only: {readOnlyReason}</div>
+    <div class="banner info"><Icon name="lock" size={12} /> {readOnlyReason}</div>
   {/if}
   {#if session.config.env === 'production' && editable && tab === 'data'}
     <div class="banner warn">Production connection: commits ask for confirmation.</div>
@@ -1154,46 +1165,72 @@
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 5px 8px;
+    gap: 2px;
+    height: 40px;
+    padding: 0 8px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-sidebar);
+    background: var(--bg);
     flex: 0 0 auto;
   }
 
-  .toolbar button {
-    padding: 3px 10px;
-    white-space: nowrap;
-  }
-
-  .toolbar > button.on {
-    background: var(--bg-hover);
-  }
-
-  .seg {
-    display: inline-flex;
-    margin-right: 6px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    overflow: hidden;
-  }
-
-  .seg button {
-    border: none;
-    border-radius: 0;
+  .tool {
     background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: var(--fg-muted);
+    padding: 3px 8px;
   }
 
-  .seg button.on {
+  .tool:hover:not(:disabled) {
+    color: var(--fg);
+  }
+
+  .tool.on {
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .count {
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    text-align: center;
     background: var(--accent);
-    color: var(--accent-fg, #fff);
+    color: var(--accent-fg);
   }
 
   .sep {
     width: 1px;
-    height: 16px;
-    margin: 0 4px;
+    height: 18px;
+    margin: 0 6px;
     background: var(--border);
+  }
+
+  .changes {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 2px 2px 10px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+  }
+
+  .pending-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--warning);
+  }
+
+  .pending-label {
+    margin-right: 4px;
+    font-weight: 500;
+    color: var(--warning);
+    font-variant-numeric: tabular-nums;
   }
 
   .grow {
@@ -1203,8 +1240,8 @@
   .banner {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 4px 12px;
+    gap: 6px;
+    padding: 5px 12px;
     font-size: 12px;
     border-bottom: 1px solid var(--border);
     flex: 0 0 auto;
@@ -1261,11 +1298,13 @@
     display: flex;
     align-items: center;
     gap: 14px;
-    padding: 3px 10px;
+    height: 26px;
+    padding: 0 10px;
     border-top: 1px solid var(--border);
-    background: var(--bg-sidebar);
+    background: var(--bg-chrome);
     color: var(--fg);
     font-size: 11px;
+    font-variant-numeric: tabular-nums;
     flex: 0 0 auto;
     white-space: nowrap;
   }

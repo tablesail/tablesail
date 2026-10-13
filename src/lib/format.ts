@@ -7,7 +7,7 @@ import type { TypeFamily, Value } from './types'
 
 export interface Formatted {
   text: string
-  /** Space-separated CSS classes understood by DataGrid: num, null, missing, mono, bool, trunc. */
+  /** Space-separated CSS classes understood by DataGrid: num, null, missing, mono, bool (+ yes/no), trunc. */
   cls: string
 }
 
@@ -21,8 +21,8 @@ export const DEFAULT_MARKER_TYPE = '$default'
 
 const NULL_CELL: Formatted = Object.freeze({ text: 'NULL', cls: 'null' })
 const MISSING_CELL: Formatted = Object.freeze({ text: '', cls: 'missing' })
-const TRUE_CELL: Formatted = Object.freeze({ text: 'true', cls: 'bool' })
-const FALSE_CELL: Formatted = Object.freeze({ text: 'false', cls: 'bool' })
+const TRUE_CELL: Formatted = Object.freeze({ text: 'true', cls: 'bool yes' })
+const FALSE_CELL: Formatted = Object.freeze({ text: 'false', cls: 'bool no' })
 const DEFAULT_CELL: Formatted = Object.freeze({ text: 'DEFAULT', cls: 'null' })
 
 const objectCache = new WeakMap<object, Formatted>()

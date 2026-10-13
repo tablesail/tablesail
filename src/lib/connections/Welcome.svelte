@@ -1,5 +1,7 @@
 <!-- Connection list: grouped by environment, searchable, Enter / double-click to open. -->
 <script lang="ts">
+  import EngineBadge from '../ui/EngineBadge.svelte'
+  import Icon from '../ui/Icon.svelte'
   import { onMount } from 'svelte'
   import Modal from '../ui/Modal.svelte'
   import ContextMenu, { type MenuItem } from '../shell/ContextMenu.svelte'
@@ -161,19 +163,25 @@
   <div class="panel">
     <header>
       <div class="brand">
-        <h1>TableSoft</h1>
-        <span class="muted">Connections</span>
+        <span class="logo"><Icon name="database" size={18} strokeWidth={1.6} /></span>
+        <div>
+          <h1>TableSoft</h1>
+          <span class="muted">Free, open-source database client</span>
+        </div>
       </div>
       <div class="actions">
-        <input
-          type="search"
-          placeholder="Search connections"
-          bind:value={search}
-          bind:this={searchEl}
-          spellcheck="false"
-        />
-        <button class="primary" onclick={() => (form = { initial: null })}>New connection</button>
-        <button class="ghost" title="Keyboard shortcuts ({modLabel}+/)" onclick={() => (ui.shortcutsHelp = true)}>?</button>
+        <div class="search">
+          <span class="search-icon"><Icon name="search" size={12} /></span>
+          <input
+            type="search"
+            placeholder="Search"
+            bind:value={search}
+            bind:this={searchEl}
+            spellcheck="false"
+          />
+        </div>
+        <button class="primary" onclick={() => (form = { initial: null })}><Icon name="plus" size={13} strokeWidth={1.8} /> New</button>
+        <button class="icon" title="Keyboard shortcuts ({modLabel}/)" aria-label="Keyboard shortcuts" onclick={() => (ui.shortcutsHelp = true)}>?</button>
       </div>
     </header>
 
@@ -192,8 +200,8 @@
       {/if}
 
       {#each groups as group (group.env)}
-        <div class="group-head">
-          <span class="dot" style:background="var(--env-{group.env})"></span>
+        <div class="group-head" style:--env="var(--env-{group.env})">
+          <span class="dot"></span>
           {group.env}
           <span class="count">{group.items.length}</span>
         </div>
@@ -211,11 +219,14 @@
             ondblclick={() => openConnection(c)}
             oncontextmenu={(e) => showMenu(e, c)}
           >
-            <span class="bar" style:background={envColor(c)}></span>
+            <span class="tile">
+              <EngineBadge engine={c.engine} size={32} />
+              <span class="env-dot" style:background={envColor(c)}></span>
+            </span>
             <div class="main">
               <div class="name">
                 {c.name}
-                {#if c.readOnly}<span class="tag">read-only</span>{/if}
+                {#if c.readOnly}<span class="tag"><Icon name="lock" size={9} /> read-only</span>{/if}
                 {#if live}<span class="tag live">connected</span>{/if}
               </div>
               <div class="sub">{ENGINE_LABEL[c.engine]} · {describeConnection(c)}</div>
@@ -223,14 +234,14 @@
                 <div class="err error-text">{openError.message}</div>
               {/if}
             </div>
-            {#if opening === c.id}<span class="muted">Connecting…</span>{/if}
+            {#if opening === c.id}<span class="muted connecting">Connecting…</span>{/if}
             <button
-              class="ghost more"
+              class="icon more"
               aria-label="Actions"
               onclick={(e) => {
                 e.stopPropagation()
                 showMenu(e, c)
-              }}>⋯</button
+              }}><Icon name="more" size={16} /></button
             >
           </div>
         {/each}
@@ -278,17 +289,17 @@
     display: flex;
     justify-content: center;
     background: var(--bg-sidebar);
-    padding: 7vh 16px 16px;
+    padding: 8vh 16px 16px;
   }
 
   .panel {
-    width: 680px;
+    width: 720px;
     max-width: 100%;
     display: flex;
     flex-direction: column;
     background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: 12px;
+    box-shadow: var(--shadow-lg);
     overflow: hidden;
     max-height: 100%;
   }
@@ -298,71 +309,111 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 14px 16px;
+    padding: 16px 16px 14px 18px;
     border-bottom: 1px solid var(--border);
   }
 
   .brand {
     display: flex;
-    align-items: baseline;
-    gap: 8px;
+    align-items: center;
+    gap: 11px;
+  }
+
+  .logo {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: linear-gradient(145deg, #3d8bfd, #0a58ca);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25);
   }
 
   h1 {
-    font-size: 17px;
+    font-size: 15px;
+    font-weight: 700;
     margin: 0;
+    line-height: 1.2;
+  }
+
+  .brand .muted {
+    font-size: 12px;
   }
 
   .actions {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: center;
   }
 
-  .actions input {
-    width: 190px;
+  .search {
+    position: relative;
+  }
+
+  .search-icon {
+    position: absolute;
+    left: 9px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--fg-faint);
+    pointer-events: none;
+  }
+
+  .search input {
+    width: 200px;
+    padding-left: 26px;
+    background: var(--bg-active);
+    border-color: transparent;
+  }
+
+  .search input:focus {
+    background: var(--bg-input);
   }
 
   .list {
     flex: 1;
     overflow: auto;
-    padding: 6px 8px 10px;
+    padding: 4px 10px 12px;
     min-height: 120px;
   }
 
   .empty {
-    padding: 36px 16px;
+    padding: 40px 16px;
     text-align: center;
   }
 
   .group-head {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 10px 8px 4px;
+    gap: 7px;
+    padding: 14px 10px 6px;
     font-size: 11px;
+    font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--fg-muted);
   }
 
   .dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
+    background: var(--env);
   }
 
   .count {
-    opacity: 0.6;
+    color: var(--fg-faint);
+    font-weight: 400;
   }
 
   .item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 8px 7px 0;
-    border-radius: 6px;
-    overflow: hidden;
+    gap: 12px;
+    padding: 8px 8px 8px 10px;
+    border-radius: 8px;
   }
 
   .item:hover {
@@ -373,11 +424,24 @@
     background: var(--selection);
   }
 
-  .bar {
-    align-self: stretch;
-    width: 4px;
-    border-radius: 0 3px 3px 0;
-    flex: none;
+  .tile {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .env-dot {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    border: 2px solid var(--bg);
+  }
+
+  .item:hover .env-dot,
+  .item.selected .env-dot {
+    border-color: transparent;
   }
 
   .main {
@@ -393,6 +457,8 @@
   }
 
   .sub {
+    margin-top: 1px;
+    font-size: 12px;
     color: var(--fg-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -405,26 +471,40 @@
   }
 
   .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 16px;
     font-size: 10px;
     font-weight: 500;
     padding: 0 6px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-active);
     color: var(--fg-muted);
   }
 
   .tag.live {
     color: var(--success);
-    border-color: var(--success);
+    background: color-mix(in srgb, var(--success) 14%, transparent);
+  }
+
+  .connecting {
+    font-size: 12px;
   }
 
   .more {
-    padding: 0 8px;
+    opacity: 0;
+  }
+
+  .item:hover .more,
+  .item.selected .more {
+    opacity: 1;
   }
 
   footer {
-    padding: 8px 16px;
+    padding: 9px 18px;
     border-top: 1px solid var(--border);
+    background: var(--bg-chrome);
     font-size: 11px;
   }
 </style>

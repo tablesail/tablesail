@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tabs } from '../stores/tabs.svelte'
   import { sessions } from '../stores/sessions.svelte'
+  import Icon from '../ui/Icon.svelte'
   import type { SessionInfo } from '../types'
 
   interface Props {
@@ -34,35 +35,42 @@
       onmousedown={(e) => e.button === 1 && e.preventDefault()}
       onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && tabs.select(t.id)}
     >
-      <span class="kind">{t.kind === 'table' ? '▦' : '›_'}</span>
+      <span class="kind"><Icon name={t.kind === 'table' ? 'table' : 'query'} size={13} /></span>
       <span class="label">{t.title}</span>
       <button
-        class="close ghost"
+        class="close icon"
         aria-label="Close tab"
+        tabindex="-1"
         onclick={(e) => {
           e.stopPropagation()
           tabs.close(t.id)
-        }}>×</button
+        }}><Icon name="close" size={11} strokeWidth={1.8} /></button
       >
     </div>
   {/each}
   <button
-    class="add ghost"
+    class="add icon"
     title="New query"
     aria-label="New query"
-    onclick={() => tabs.newQuery(session.sessionId, sessions.database(session.sessionId))}>+</button
+    tabindex="-1"
+    onmousedown={(e) => e.preventDefault()}
+    onclick={() => tabs.newQuery(session.sessionId, sessions.database(session.sessionId))}
+    ><Icon name="plus" size={14} /></button
   >
 </div>
 
 <style>
   .bar {
     display: flex;
-    align-items: stretch;
-    background: var(--bg-sidebar);
+    align-items: flex-end;
+    gap: 1px;
+    padding: 0 6px;
+    background: var(--bg-chrome);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
+    overflow-y: hidden;
     flex: none;
-    height: 32px;
+    height: 34px;
   }
 
   .bar::-webkit-scrollbar {
@@ -70,47 +78,84 @@
   }
 
   .tab {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 0 6px 0 12px;
-    max-width: 200px;
-    border-right: 1px solid var(--border);
+    height: 29px;
+    padding: 0 4px 0 10px;
+    min-width: 90px;
+    max-width: 210px;
+    border-radius: 7px 7px 0 0;
     color: var(--fg-muted);
     flex: none;
+    margin-bottom: -1px;
+    border: 1px solid transparent;
+    border-bottom: none;
   }
 
-  .tab:hover {
+  .tab:hover:not(.active) {
     background: var(--bg-hover);
+  }
+
+  .tab:not(.active):not(:hover) + .tab:not(.active):not(:hover)::before {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: 8px;
+    bottom: 8px;
+    width: 1px;
+    background: var(--border-strong);
   }
 
   .tab.active {
     background: var(--bg);
     color: var(--fg);
-    box-shadow: inset 0 -2px 0 var(--accent);
+    border-color: var(--border);
+    height: 30px;
   }
 
   .kind {
-    font-size: 10px;
-    opacity: 0.7;
+    opacity: 0.75;
+  }
+
+  .active .kind {
+    color: var(--accent);
+    opacity: 1;
   }
 
   .label {
+    flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .close {
-    padding: 0 5px;
-    line-height: 1.2;
-    font-size: 15px;
+    width: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    height: 18px;
     border-radius: 4px;
+    opacity: 0;
+  }
+
+  .tab:hover .close,
+  .tab.active .close {
+    opacity: 1;
+  }
+
+  .close:hover:not(:disabled) {
+    background: var(--bg-active);
   }
 
   .add {
-    padding: 0 12px;
-    font-size: 16px;
-    border-radius: 0;
+    align-self: center;
+    margin-left: 2px;
+    border-radius: 6px;
+  }
+
+  .add:hover:not(:disabled) {
+    background: var(--bg-hover);
   }
 </style>

@@ -1,6 +1,7 @@
 <!-- Database picker + filterable tree of tables/views/collections for one session. -->
 <script lang="ts">
   import ContextMenu, { type MenuItem } from '../shell/ContextMenu.svelte'
+  import Icon, { type IconName } from '../ui/Icon.svelte'
   import { sessions } from '../stores/sessions.svelte'
   import { tabs } from '../stores/tabs.svelte'
   import { ui } from '../stores/ui.svelte'
@@ -22,16 +23,16 @@
   let entry = $derived(sessions.schemaEntry(session.sessionId, database))
   let activeTab = $derived(tabs.active(session.sessionId))
 
-  const KIND: Record<TableKind, { glyph: string; label: string; color: string }> = {
-    table: { glyph: 'T', label: 'Table', color: '#3b82c4' },
-    view: { glyph: 'V', label: 'View', color: '#8b5cf6' },
-    materializedView: { glyph: 'M', label: 'Materialized view', color: '#a855f7' },
-    foreignTable: { glyph: 'F', label: 'Foreign table', color: '#0e9aa7' },
-    virtual: { glyph: 'T', label: 'Virtual table', color: '#6b7280' },
-    sequence: { glyph: '#', label: 'Sequence', color: '#6b7280' },
-    collection: { glyph: 'C', label: 'Collection', color: '#2e9e4f' },
-    timeSeries: { glyph: 'S', label: 'Time series', color: '#2e9e4f' },
-    system: { glyph: 'S', label: 'System', color: '#6b7280' },
+  const KIND: Record<TableKind, { icon: IconName; label: string; color: string }> = {
+    table: { icon: 'table', label: 'Table', color: 'var(--kind-table)' },
+    view: { icon: 'view', label: 'View', color: 'var(--kind-view)' },
+    materializedView: { icon: 'matview', label: 'Materialized view', color: 'var(--kind-view)' },
+    foreignTable: { icon: 'table', label: 'Foreign table', color: 'var(--kind-other)' },
+    virtual: { icon: 'table', label: 'Virtual table', color: 'var(--kind-other)' },
+    sequence: { icon: 'sequence', label: 'Sequence', color: 'var(--kind-other)' },
+    collection: { icon: 'collection', label: 'Collection', color: 'var(--kind-collection)' },
+    timeSeries: { icon: 'collection', label: 'Time series', color: 'var(--kind-collection)' },
+    system: { icon: 'table', label: 'System', color: 'var(--kind-other)' },
   }
 
   let groups = $derived.by(() => {
@@ -127,15 +128,16 @@
       {/if}
     </select>
     <button
-      class="ghost refresh"
+      class="icon refresh"
       class:spin={entry.loading}
-      title="Refresh schema"
+      title={entry.loading ? 'Refreshing schema…' : 'Refresh schema'}
       aria-label="Refresh schema"
-      onclick={() => sessions.refreshSchema(session.sessionId, database)}>↻</button
+      onclick={() => sessions.refreshSchema(session.sessionId, database)}><Icon name="refresh" /></button
     >
   </div>
   <div class="filter">
-    <input type="search" placeholder="Filter tables" bind:value={filter} spellcheck="false" />
+    <span class="search-icon"><Icon name="search" size={12} /></span>
+    <input type="search" placeholder="Filter" bind:value={filter} spellcheck="false" />
   </div>
 
   <div class="tree" role="tree">
@@ -150,7 +152,7 @@
     {#each groups as g (g.schema)}
       {#if showHeaders}
         <button class="schema" onclick={() => toggle(g.schema)} aria-expanded={!isCollapsed(g.schema)}>
-          <span class="chev" class:open={!isCollapsed(g.schema)}>▸</span>
+          <span class="chev" class:open={!isCollapsed(g.schema)}><Icon name="chevron-right" size={10} strokeWidth={2} /></span>
           {g.schema || '(default)'}
           <span class="count">{g.tables.length}</span>
         </button>
@@ -170,7 +172,7 @@
             onclick={() => open(t)}
             oncontextmenu={(e) => onContext(e, t)}
           >
-            <span class="kind" style:background={k.color} title={k.label}>{k.glyph}</span>
+            <span class="kind" style:color={k.color} title={k.label}><Icon name={k.icon} size={14} /></span>
             <span class="name">{t.name}</span>
             {#if t.estimatedRows != null}
               <span class="rows" title="≈ {formatCount(t.estimatedRows)} rows">{compactCount(t.estimatedRows)}</span>
@@ -192,6 +194,10 @@
 
 <style>
   .sidebar {
+    --kind-table: #3b82c4;
+    --kind-view: #8b5cf6;
+    --kind-collection: #2e9e4f;
+    --kind-other: var(--fg-muted);
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -201,19 +207,17 @@
 
   .top {
     display: flex;
+    align-items: center;
     gap: 4px;
     padding: 8px 8px 4px;
   }
 
   .top select {
     flex: 1;
+    font-weight: 500;
   }
 
-  .refresh {
-    padding: 0 8px;
-  }
-
-  .refresh.spin {
+  .refresh.spin :global(svg) {
     animation: spin 0.9s linear infinite;
   }
 
@@ -224,17 +228,33 @@
   }
 
   .filter {
-    padding: 4px 8px 6px;
+    position: relative;
+    padding: 4px 8px 8px;
+  }
+
+  .search-icon {
+    position: absolute;
+    left: 16px;
+    top: 11px;
+    color: var(--fg-faint);
+    pointer-events: none;
   }
 
   .filter input {
     width: 100%;
+    padding-left: 25px;
+    background: var(--bg-active);
+    border-color: transparent;
+  }
+
+  .filter input:focus {
+    background: var(--bg-input);
   }
 
   .tree {
     flex: 1;
     overflow: auto;
-    padding: 0 4px 8px;
+    padding: 0 6px 8px;
   }
 
   .note {
@@ -246,20 +266,31 @@
   .schema {
     display: flex;
     align-items: center;
-    gap: 5px;
+    justify-content: flex-start;
+    gap: 4px;
     width: 100%;
+    min-height: 24px;
     text-align: left;
     background: transparent;
     border: none;
-    padding: 4px 6px;
+    box-shadow: none;
+    padding: 2px 6px;
+    margin-top: 4px;
+    font-size: 11px;
     font-weight: 600;
+    letter-spacing: 0.02em;
     color: var(--fg-muted);
   }
 
+  .schema:hover:not(:disabled) {
+    background: transparent;
+    color: var(--fg);
+  }
+
   .chev {
-    display: inline-block;
-    transition: transform 0.1s;
-    font-size: 10px;
+    display: inline-flex;
+    transition: transform 0.12s;
+    opacity: 0.8;
   }
 
   .chev.open {
@@ -269,21 +300,22 @@
   .count {
     margin-left: auto;
     font-weight: 400;
-    font-size: 11px;
-    opacity: 0.7;
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
   }
 
   .row {
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 3px 8px;
-    border-radius: 5px;
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 6px;
     white-space: nowrap;
   }
 
   .row.indent {
-    padding-left: 20px;
+    padding-left: 18px;
   }
 
   .row:hover {
@@ -294,16 +326,13 @@
     background: var(--selection);
   }
 
+  .row.active .name {
+    font-weight: 500;
+  }
+
   .kind {
     flex: none;
-    width: 15px;
-    height: 15px;
-    border-radius: 3px;
-    color: #fff;
-    font-size: 9px;
-    font-weight: 700;
-    line-height: 15px;
-    text-align: center;
+    display: inline-flex;
   }
 
   .name {
@@ -315,7 +344,7 @@
   .rows {
     flex: none;
     font-size: 11px;
-    color: var(--fg-muted);
+    color: var(--fg-faint);
     font-variant-numeric: tabular-nums;
   }
 </style>

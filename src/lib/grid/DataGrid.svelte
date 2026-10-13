@@ -790,12 +790,11 @@
               class:sortable={!!onSort}
               style:left="{colLeft[c]}px"
               style:width="{effWidths[c]}px"
-              title="{col.name} · {col.typeName}"
+              title="{col.name}  ·  {col.typeName}"
               onclick={() => headerClick(c)}
             >
               <span class="hname">{col.name}</span>
               {#if hint}<span class="badge">{hint}</span>{/if}
-              <span class="htype">{col.typeName}</span>
               {#if srt}<span class="sort">{srt.descending ? '▼' : '▲'}</span>{/if}
               <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
               <div
@@ -910,9 +909,9 @@
 <style>
   .grid {
     --g-line: var(--border);
-    --g-alt: rgb(128 128 128 / 0.07);
+    --g-alt: var(--bg-alt);
     --g-sel: var(--selection, rgb(10 102 216 / 0.16));
-    --g-head: var(--bg-sidebar);
+    --g-head: var(--bg-chrome);
     --g-inserted: rgb(46 160 67 / 0.2);
     --g-deleted: rgb(229 72 77 / 0.18);
     --g-edited: rgb(212 160 23 / 0.3);
@@ -1003,39 +1002,32 @@
   }
 
   .h.sortable:hover {
-    background: rgb(128 128 128 / 0.12);
+    background: var(--bg-hover);
   }
 
   .hname {
     font-weight: 600;
+    color: var(--fg);
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 0 1 auto;
     min-width: 0;
   }
 
-  .htype {
-    color: var(--fg-muted);
-    font-size: 10.5px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
   .badge {
-    font-size: 9.5px;
+    font-size: 9px;
     font-weight: 700;
-    color: var(--accent);
-    border: var(--hair) solid var(--accent);
+    letter-spacing: 0.03em;
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
     border-radius: 3px;
-    padding: 0 3px;
-    line-height: 13px;
+    padding: 0 4px;
+    line-height: 14px;
   }
 
   .sort {
     margin-left: auto;
-    font-size: 9px;
+    font-size: 8px;
     color: var(--accent);
   }
 
@@ -1068,7 +1060,8 @@
     line-height: 24px;
     padding: 0 8px;
     text-align: right;
-    color: var(--fg-muted);
+    font-size: 11px;
+    color: var(--fg-faint);
     font-variant-numeric: tabular-nums;
     border-bottom: var(--hair) solid var(--g-line);
     overflow: hidden;
@@ -1106,7 +1099,7 @@
   }
 
   .row:hover {
-    background: rgb(128 128 128 / 0.1);
+    background: var(--bg-hover);
   }
 
   .row.inserted {
@@ -1142,20 +1135,26 @@
 
   .cell.null,
   .cell.missing {
-    color: var(--fg-muted);
+    color: var(--fg-faint);
   }
 
   .cell.null {
-    font-style: italic;
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
   }
 
   .cell.mono {
-    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-family: var(--mono);
     font-size: 11.5px;
+    color: color-mix(in srgb, var(--fg) 80%, transparent);
   }
 
-  .cell.bool {
-    font-weight: 500;
+  .cell.bool.yes {
+    color: var(--success);
+  }
+
+  .cell.bool.no {
+    color: var(--fg-muted);
   }
 
   .cell.edited {
