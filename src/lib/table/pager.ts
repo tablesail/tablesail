@@ -99,6 +99,8 @@ export class Pager {
         this.inflight.delete(p)
         this.failed.delete(p)
         this.pages.set(p, page.rows)
+        // The new page is now the newest; a page read before it is no longer last in the map.
+        this.lastTouched = -1
         this.evict()
         this.onPage?.(page, p)
       },

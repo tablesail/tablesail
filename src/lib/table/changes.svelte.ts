@@ -240,8 +240,10 @@ export class ChangeStore {
   }
 
   discardRow(keyStr: string) {
-    const had = this.edits.delete(keyStr) || this.deleted.delete(keyStr)
-    if (had) this.touch()
+    // Both maps, always: `||` would skip the delete when the row also has edits.
+    const hadEdits = this.edits.delete(keyStr)
+    const hadDelete = this.deleted.delete(keyStr)
+    if (hadEdits || hadDelete) this.touch()
   }
 
   /** Statements are built from this: inserts first, then updates, then deletes. */

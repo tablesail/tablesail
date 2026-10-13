@@ -66,7 +66,13 @@ export function formatBytes(n: number): string {
     v /= 1024
     u++
   }
-  return `${v >= 100 ? v.toFixed(0) : v.toFixed(1)} ${units[u]}`
+  const digits = (x: number) => (x >= 100 ? 0 : 1)
+  // Rounding can land on 1024 of this unit (1 MB - 1 byte): show it as 1.0 of the next one.
+  if (Number(v.toFixed(digits(v))) >= 1024 && u < units.length - 1) {
+    v /= 1024
+    u++
+  }
+  return `${v.toFixed(digits(v))} ${units[u]}`
 }
 
 export function formatCount(n: number): string {
@@ -159,8 +165,8 @@ export function valueToEditText(value: Value | undefined): string {
  */
 export function statusTone(text: string): 'good' | 'warn' | 'bad' | 'info' | 'neutral' {
   const t = text.toLowerCase()
-  if (/^(active|paid|ok|success|succeeded|done|complete|completed|approved|enabled|open|online|happy|yes|healthy|live|published)$/.test(t)) return 'good'
-  if (/^(pending|paused|waiting|draft|queued|processing|review|trial|warning|ok?ay)$/.test(t)) return 'warn'
+  if (/^(active|paid|ok|success|succeeded|done|complete|completed|approved|enabled|open|online|happy|yes|healthy|live|published|okay)$/.test(t)) return 'good'
+  if (/^(pending|paused|waiting|draft|queued|processing|review|trial|warning)$/.test(t)) return 'warn'
   if (/^(failed|error|refunded|cancel(l)?ed|rejected|blocked|banned|deleted|disabled|closed|offline|sad|expired|overdue)$/.test(t)) return 'bad'
   if (/^(shipped|sent|new|scheduled|running|in[_ ]progress|delivered)$/.test(t)) return 'info'
   return 'neutral'

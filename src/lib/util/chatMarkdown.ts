@@ -19,12 +19,14 @@ const HEADING = /^\s{0,3}#{1,6}\s+(.*)$/
 
 export function parseInline(text: string): Inline[] {
   const out: Inline[] = []
-  for (const part of text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/)) {
-    if (!part) continue
-    if (part.length > 2 && part.startsWith('`') && part.endsWith('`')) out.push({ kind: 'code', text: part.slice(1, -1) })
-    else if (part.length > 4 && part.startsWith('**') && part.endsWith('**')) out.push({ kind: 'bold', text: part.slice(2, -2) })
-    else out.push({ kind: 'text', text: part })
-  }
+  // split() with a capture group puts every match at an odd index; the even parts are the
+  // text between matches and must stay text even if they happen to start and end with a marker.
+  text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).forEach((part, i) => {
+    if (!part) return
+    if (i % 2 === 0) out.push({ kind: 'text', text: part })
+    else if (part.startsWith('`')) out.push({ kind: 'code', text: part.slice(1, -1) })
+    else out.push({ kind: 'bold', text: part.slice(2, -2) })
+  })
   return out
 }
 
