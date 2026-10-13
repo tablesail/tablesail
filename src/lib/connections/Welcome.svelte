@@ -1,6 +1,7 @@
 <!-- Connection list: grouped by environment, searchable, Enter / double-click to open. -->
 <script lang="ts">
   import EngineBadge from '../ui/EngineBadge.svelte'
+  import TopBar from '../shell/TopBar.svelte'
   import Icon from '../ui/Icon.svelte'
   import { onMount } from 'svelte'
   import Modal from '../ui/Modal.svelte'
@@ -167,96 +168,95 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="welcome">
-  <aside class="intro" data-tauri-drag-region class:mac={isMac}>
-    <div class="hero" data-tauri-drag-region>
-      <span class="logo"><Icon name="database" size={34} strokeWidth={1.3} /></span>
-      <h1>TableSoft</h1>
-      <p class="muted">{version ? `Version ${version}` : '\u00a0'}</p>
-    </div>
-    <div class="actions">
-      <button class="action" onclick={() => (form = { initial: null })}>
-        <Icon name="plus" size={14} /> Create a new connection…
-      </button>
-      <button class="action" onclick={() => (form = { initial: { ...newConfig('sqlite'), name: '' } })}>
-        <Icon name="database" size={14} /> Open a SQLite file…
-      </button>
-      <button class="action" onclick={() => (ui.shortcutsHelp = true)}>
-        <Icon name="key" size={14} /> Keyboard shortcuts
-      </button>
-    </div>
-    <p class="foot muted">Free and open source · MIT</p>
-  </aside>
+  <TopBar session={null} />
 
-  <section class="conns">
-    <div class="search" data-tauri-drag-region>
-      <span class="search-icon"><Icon name="search" size={13} /></span>
-      <input
-        type="search"
-        placeholder="Search for connection…"
-        bind:value={search}
-        bind:this={searchEl}
-        spellcheck="false"
-      />
-    </div>
+  <div class="scroll">
+    <div class="inner">
+      <section class="hero">
+        <span class="mark"><Icon name="pulse" size={24} strokeWidth={1.5} /></span>
+        <h1>Your databases, one calm place.</h1>
+        <p>
+          Browse millions of rows without waiting, edit safely with a SQL preview, and keep production
+          clearly marked. PostgreSQL, MySQL, MariaDB, SQLite and MongoDB.
+        </p>
+        <div class="hero-actions">
+          <button class="primary big" onclick={() => (form = { initial: null })}><Icon name="plus" size={14} strokeWidth={1.8} /> New connection</button>
+          <button class="outline big" onclick={() => (form = { initial: { ...newConfig('sqlite'), name: '' } })}><Icon name="database" size={14} /> Open a SQLite file</button>
+        </div>
+      </section>
 
-    <div class="list">
+      <div class="listhead">
+        <span class="overline">Connections <span class="n">{connections.list.length}</span></span>
+        <label class="search">
+          <Icon name="search" size={13} />
+          <input type="search" placeholder="Search connections…" bind:value={search} bind:this={searchEl} spellcheck="false" />
+        </label>
+      </div>
+
       {#if connections.error}
         <div class="empty error-text">Could not load connections: {connections.error}</div>
       {:else if !connections.loaded}
-        <div class="empty muted">Loading…</div>
+        <div class="empty">Loading…</div>
       {:else if connections.list.length === 0}
-        <div class="empty">
-          <p>No connections yet.</p>
-          <button class="primary" onclick={() => (form = { initial: null })}>Create your first connection</button>
-        </div>
+        <div class="empty">No connections yet. Create one to get started.</div>
       {:else if flat.length === 0}
-        <div class="empty muted">No connections match “{search}”.</div>
+        <div class="empty">No connections match “{search}”.</div>
       {/if}
 
-      {#each flat as c (c.id)}
-        {@const live = sessions.byConnection(c.id)}
-        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-        <div
-          class="item"
-          class:selected={c.id === selectedId}
-          data-conn={c.id}
-          role="option"
-          aria-selected={c.id === selectedId}
-          tabindex="-1"
-          onclick={() => (selectedId = c.id)}
-          ondblclick={() => openConnection(c)}
-          oncontextmenu={(e) => showMenu(e, c)}
-        >
-          <EngineBadge engine={c.engine} size={36} />
-          <div class="main">
-            <div class="name">
-              <span class="n">{c.name}</span>
-              <span class="tag" style:--env={envColor(c)}>{envLabel[c.env]}</span>
-              {#if c.readOnly}<span class="lock" title="Read-only"><Icon name="lock" size={11} /></span>{/if}
-              {#if live}<span class="live" title="Connected"></span>{/if}
+      <div class="cards">
+        {#each flat as c (c.id)}
+          {@const live = sessions.byConnection(c.id)}
+          <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+          <div
+            class="card"
+            class:selected={c.id === selectedId}
+            style:--env={envColor(c)}
+            data-conn={c.id}
+            role="option"
+            aria-selected={c.id === selectedId}
+            tabindex="-1"
+            onclick={() => (selectedId = c.id)}
+            ondblclick={() => openConnection(c)}
+            oncontextmenu={(e) => showMenu(e, c)}
+          >
+            <div class="top">
+              <EngineBadge engine={c.engine} size={34} />
+              <div class="main">
+                <div class="name">{c.name}</div>
+                <div class="sub">{ENGINE_LABEL[c.engine]}</div>
+              </div>
+              <button
+                class="icon more"
+                aria-label="Actions"
+                onclick={(e) => {
+                  e.stopPropagation()
+                  showMenu(e, c)
+                }}><Icon name="more" size={16} /></button
+              >
             </div>
-            <div class="sub">{describeConnection(c) || ENGINE_LABEL[c.engine]}</div>
+            <div class="addr">{describeConnection(c) || '—'}</div>
+            <div class="bottom">
+              <span class="tag">{envLabel[c.env]}</span>
+              {#if c.readOnly}<span class="tag ro"><Icon name="lock" size={10} /> read-only</span>{/if}
+              <span class="grow"></span>
+              {#if opening === c.id}
+                <span class="state">Connecting…</span>
+              {:else if live}
+                <span class="state on"><i class="live-dot"></i> Connected</span>
+              {:else}
+                <button class="open" onclick={(e) => { e.stopPropagation(); openConnection(c) }}>Open</button>
+              {/if}
+            </div>
             {#if openError?.id === c.id}
               <div class="err error-text">{openError.message}</div>
             {/if}
           </div>
-          {#if opening === c.id}<span class="connecting">Connecting…</span>{/if}
-          <button
-            class="icon more"
-            aria-label="Actions"
-            onclick={(e) => {
-              e.stopPropagation()
-              showMenu(e, c)
-            }}><Icon name="more" size={16} /></button
-          >
-        </div>
-      {/each}
-    </div>
+        {/each}
+      </div>
 
-    <footer class="muted">
-      <span><kbd>↑</kbd><kbd>↓</kbd> select · <kbd>↵</kbd> open · <kbd>{modLabel}</kbd><kbd>N</kbd> new</span>
-    </footer>
-  </section>
+      <p class="hint">Double-click a card to connect · <kbd>↵</kbd> opens the selected one · <kbd>{modLabel}</kbd><kbd>N</kbd> new connection</p>
+    </div>
+  </div>
 </div>
 
 {#if form}
@@ -291,159 +291,146 @@
 <style>
   .welcome {
     height: 100%;
-    display: grid;
-    grid-template-columns: 280px 1fr;
-    background: var(--bg);
-  }
-
-  .intro {
     display: flex;
     flex-direction: column;
-    padding: 40px 20px 16px;
     background: var(--bg-chrome);
-    border-right: 1px solid var(--border-strong);
+  }
+
+  .scroll {
+    flex: 1;
+    overflow: auto;
+  }
+
+  .inner {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 30px 30px 40px;
   }
 
   .hero {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    margin: 24px 0 28px;
+    padding: 30px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-strong));
+    background: linear-gradient(135deg, var(--bg-input), color-mix(in srgb, var(--success) 12%, var(--bg-input)));
   }
 
-  .logo {
-    width: 84px;
-    height: 84px;
-    border-radius: 20px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    background: linear-gradient(160deg, #4f9bff 0%, #1462d6 60%, #0d47a8 100%);
-    box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 0.3),
-      0 8px 20px rgb(13 71 168 / 0.3);
-    margin-bottom: 10px;
+  .mark {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    margin-bottom: 20px;
+    border-radius: 12px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 18%, transparent);
   }
 
   h1 {
     margin: 0;
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-size: 28px;
+    font-weight: 760;
+    letter-spacing: -0.05em;
   }
 
   .hero p {
-    margin: 0;
-    font-size: 12px;
+    max-width: 560px;
+    margin: 12px 0 22px;
+    line-height: 1.8;
+    color: var(--fg-muted);
   }
 
-  .actions {
+  .hero-actions {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .action {
-    justify-content: flex-start;
     gap: 9px;
-    height: 32px;
-    padding: 0 12px;
-    border-radius: 7px;
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
-    color: var(--fg);
   }
 
-  .action :global(svg) {
-    color: var(--accent);
+  .big {
+    min-height: 34px;
+    padding: 0 14px;
+    gap: 7px;
   }
 
-  .action:hover:not(:disabled) {
-    background: var(--bg-active);
-  }
-
-  .foot {
-    margin: auto 0 0;
-    text-align: center;
-    font-size: 11px;
-  }
-
-  .conns {
+  .listhead {
     display: flex;
-    flex-direction: column;
-    min-width: 0;
-    min-height: 0;
+    align-items: center;
+    justify-content: space-between;
+    margin: 34px 0 14px;
+  }
+
+  .n {
+    margin-left: 6px;
+    color: var(--fg-muted);
   }
 
   .search {
-    position: relative;
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 260px;
+    height: 31px;
+    padding: 0 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: 7px;
+    background: var(--bg-input);
+    color: var(--fg-muted);
   }
 
-  .search-icon {
-    position: absolute;
-    left: 24px;
-    top: 50%;
-    transform: translateY(-48%);
-    color: var(--fg-faint);
-    pointer-events: none;
+  .search:focus-within {
+    border-color: var(--accent);
   }
 
   .search input {
-    width: 100%;
-    height: 30px;
-    padding-left: 30px;
-    border-radius: 7px;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-size: 11px;
   }
 
-  .list {
-    flex: 1;
-    overflow: auto;
-    padding: 6px 8px;
-    min-height: 120px;
+  .search input:focus {
+    box-shadow: none;
   }
 
   .empty {
-    padding: 48px 16px;
+    padding: 40px 16px;
     text-align: center;
+    color: var(--fg-muted);
   }
 
-  .item {
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 12px;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 11px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-input);
+    transition: border-color 0.12s;
+  }
+
+  .card:hover {
+    border-color: var(--border-input);
+  }
+
+  .card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .top {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 10px;
-    border-radius: 8px;
-  }
-
-  .item + .item {
-    margin-top: 1px;
-  }
-
-  .item:hover {
-    background: var(--bg-hover);
-  }
-
-  .item.selected {
-    background: var(--accent-solid);
-    color: #fff;
-  }
-
-  .item.selected .sub,
-  .item.selected .lock,
-  .item.selected .more,
-  .item.selected .connecting {
-    color: inherit;
-    opacity: 0.85;
-  }
-
-  .item.selected .tag {
-    background: rgb(255 255 255 / 0.22);
-    color: #fff;
+    gap: 11px;
   }
 
   .main {
@@ -452,59 +439,17 @@
   }
 
   .name {
-    display: flex;
-    gap: 7px;
-    align-items: center;
-    font-weight: 600;
-  }
-
-  .n {
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: -0.012em;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .tag {
-    flex: none;
-    height: 16px;
-    line-height: 16px;
-    padding: 0 6px;
-    border-radius: 4px;
-    font-size: 10.5px;
-    font-weight: 600;
-    color: var(--env);
-    background: color-mix(in srgb, var(--env) 15%, transparent);
-  }
-
-  .lock {
-    display: inline-flex;
-    color: var(--warning);
-  }
-
-  .live {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--success);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 25%, transparent);
   }
 
   .sub {
     margin-top: 2px;
-    font-size: 12px;
-    color: var(--fg-muted);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .err {
-    margin-top: 2px;
-    white-space: pre-wrap;
-  }
-
-  .connecting {
-    font-size: 12px;
+    font-size: 10px;
     color: var(--fg-muted);
   }
 
@@ -512,18 +457,99 @@
     opacity: 0;
   }
 
-  .item:hover .more,
-  .item.selected .more {
+  .card:hover .more,
+  .card.selected .more {
     opacity: 1;
   }
 
-  footer {
-    padding: 8px 16px;
-    border-top: 1px solid var(--border);
+  .addr {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--mono-fg);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .bottom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 640;
+    color: var(--env);
+    background: color-mix(in srgb, var(--env) 15%, transparent);
+  }
+
+  .tag::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .tag.ro {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 15%, transparent);
+  }
+
+  .tag.ro::before {
+    display: none;
+  }
+
+  .grow {
+    flex: 1;
+  }
+
+  .state {
+    font-size: 10px;
+    color: var(--fg-muted);
+  }
+
+  .state.on {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--success);
+  }
+
+  .open {
+    min-height: 24px;
+    padding: 0 10px;
     font-size: 11px;
   }
 
-  footer kbd + kbd {
+  .card:hover .open,
+  .card.selected .open {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 700;
+  }
+
+  .err {
+    white-space: pre-wrap;
+    font-size: 11px;
+  }
+
+  .hint {
+    margin: 22px 0 0;
+    text-align: center;
+    font-size: 11px;
+    color: var(--fg-faint);
+  }
+
+  .hint kbd + kbd {
     margin-left: 2px;
   }
 </style>

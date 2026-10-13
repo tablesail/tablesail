@@ -34,6 +34,21 @@
     | 'undo'
     | 'server'
     | 'sequence'
+    | 'pulse'
+    | 'code'
+    | 'clock'
+    | 'star'
+    | 'layers'
+    | 'activity'
+    | 'settings'
+    | 'bolt'
+    | 'panel'
+    | 'shield'
+    | 'command'
+    | 'link'
+    | 'sun'
+    | 'moon'
+    | 'grid'
 
   const PATHS: Record<IconName, string> = {
     table: 'M2.5 3.5h11v9h-11z M2.5 6.5h11 M2.5 9.5h11 M6.5 6.5v6',
@@ -66,6 +81,43 @@
     undo: 'M5 4.5L2.5 7 5 9.5 M2.5 7H10a3.5 3.5 0 0 1 0 7H7',
     server: 'M2.5 3h11v4h-11z M2.5 9h11v4h-11z M5 5h.01 M5 11h.01',
     sequence: 'M3 5h10 M3 8h10 M3 11h6',
+    pulse: '',
+    code: '',
+    clock: '',
+    star: '',
+    layers: '',
+    activity: '',
+    settings: '',
+    bolt: '',
+    panel: '',
+    shield: '',
+    command: '',
+    link: '',
+    sun: '',
+    moon: '',
+    grid: '',
+  }
+
+  // Icons drawn on a 24×24 grid (from the Table Pulse concept), as inner SVG markup.
+  const ICONS24: Partial<Record<IconName, string>> = {
+    pulse: '<path d="M2 12h4l3.1-7 5.1 14 3.1-7H22"/>',
+    code: '<path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-3 16"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 6v6l4 2"/>',
+    star: '<path d="m12 2 3.1 6.4 7.1 1-5.1 5 .9 7-6-3.3L5.9 21l1-6.6-5-5 7-1L12 2z"/>',
+    layers: '<path d="m12 2 9 5-9 5-9-5 9-5Zm-9 10 9 5 9-5M3 17l9 5 9-5"/>',
+    activity: '<path d="M3 18v-6m6 6V6m6 12v-9m6 9V3"/>',
+    settings:
+      '<path d="m10 2-.5 2.2-2 1.2-2.1-.7-2 3.5 1.7 1.5v2.4l-1.7 1.4 2 3.6 2.2-.8 2 1.2L10 20h4l.5-2.3 2-1.1 2.1.7 2-3.6-1.7-1.5V9.8l1.7-1.4-2-3.6-2.1.8-2-1.3L14 2z"/><circle cx="12" cy="11" r="2.5"/>',
+    bolt: '<path d="m13 2-9 12h7l-1 8 10-13h-8l1-7Z"/>',
+    panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+    shield: '<path d="m12 2 8 4v6c0 5-3 8-8 10-5-2-8-5-8-10V6l8-4Z"/><path d="m9 12 2 2 4-4"/>',
+    command: '<path d="M8 8H5a3 3 0 1 1 3-3v14a3 3 0 1 1-3-3h14a3 3 0 1 1-3 3V5a3 3 0 1 1 3 3H8Z"/>',
+    link: '<path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/>',
+    database: '<ellipse cx="12" cy="5" rx="8.5" ry="3.1"/><path d="M3.5 5v14c0 2 17 4 17 0V5M3.5 12c0 4 17 4 17 0"/>',
+    table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/>',
+    grid: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/>',
   }
 </script>
 
@@ -80,20 +132,37 @@
   let { name, size = 14, strokeWidth = 1.4, class: cls = '' }: Props = $props()
 </script>
 
-<svg
-  class="icon {cls}"
-  width={size}
-  height={size}
-  viewBox="0 0 16 16"
-  fill="none"
-  stroke="currentColor"
-  stroke-width={name === 'more' ? 2.4 : strokeWidth}
-  stroke-linecap="round"
-  stroke-linejoin="round"
-  aria-hidden="true"
->
-  <path d={PATHS[name]} />
-</svg>
+{#if ICONS24[name]}
+  <svg
+    class="icon {cls}"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width={strokeWidth * 1.2}
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    {@html ICONS24[name]}
+  </svg>
+{:else}
+  <svg
+    class="icon {cls}"
+    width={size}
+    height={size}
+    viewBox="0 0 16 16"
+    fill="none"
+    stroke="currentColor"
+    stroke-width={name === 'more' ? 2.4 : strokeWidth}
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d={PATHS[name]} />
+  </svg>
+{/if}
 
 <style>
   .icon {

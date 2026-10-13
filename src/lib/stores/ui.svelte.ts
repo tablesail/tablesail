@@ -18,11 +18,16 @@ export interface ImportRequest {
   table: TableRef
 }
 
+export type RailView = 'browser' | 'history' | 'saved'
+
 class UiStore {
   toasts = $state<Toast[]>([])
+  /** Which panel the left explorer shows. */
+  rail = $state<RailView>('browser')
+  palette = $state(false)
+  settings = $state(false)
   exportRequest = $state<ExportRequest | null>(null)
   importRequest = $state<ImportRequest | null>(null)
-  quickOpen = $state(false)
   shortcutsHelp = $state(false)
   about = $state(false)
 

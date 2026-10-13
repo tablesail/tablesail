@@ -45,7 +45,7 @@
           tabs.close(t.id)
         }}><Icon name="close" size={10} strokeWidth={1.8} /></button
       >
-      <span class="label"><span class="kind"><Icon name={t.kind === 'table' ? 'table' : 'query'} size={12} /></span><span class="t">{t.title}</span></span>
+      <span class="label"><span class="kind"><Icon name={t.kind === 'table' ? 'table' : 'code'} size={13} /></span><span class="t">{t.title}</span></span>
     </div>
   {/each}
   <button
@@ -63,12 +63,14 @@
   .bar {
     display: flex;
     align-items: stretch;
-    background: var(--bg-chrome);
-    border-bottom: 1px solid var(--border-strong);
+    gap: 2px;
+    height: 47px;
+    padding-left: 12px;
+    background: var(--bg-tabbar);
+    border-bottom: 1px solid var(--border);
     overflow-x: auto;
     overflow-y: hidden;
     flex: none;
-    height: 30px;
   }
 
   .bar::-webkit-scrollbar {
@@ -77,20 +79,18 @@
 
   .tab {
     position: relative;
-    flex: 1 1 0;
-    min-width: 110px;
-    max-width: 260px;
+    flex: 0 0 auto;
+    min-width: 120px;
+    max-width: 195px;
     display: flex;
     align-items: center;
-    padding: 0 26px;
-    border-right: 1px solid var(--border-strong);
+    padding: 0 30px 0 13px;
     color: var(--fg-muted);
-    font-size: 12px;
-    background: color-mix(in srgb, var(--bg-active) 60%, transparent);
+    font-size: 11px;
   }
 
   .tab:hover:not(.active) {
-    background: var(--bg-active);
+    background: var(--bg-hover);
   }
 
   .tab.active {
@@ -98,12 +98,21 @@
     color: var(--fg);
   }
 
+  .tab.active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent);
+  }
+
   .label {
     flex: 1;
     display: flex;
     align-items: center;
-    justify-content: center;
-    gap: 5px;
+    gap: 8px;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
@@ -117,32 +126,28 @@
   .kind {
     display: inline-flex;
     flex: none;
-    opacity: 0.7;
-  }
-
-  .active .kind {
-    color: var(--accent);
-    opacity: 1;
   }
 
   .close {
     position: absolute;
-    left: 5px;
+    right: 8px;
     top: 50%;
     transform: translateY(-50%);
-    width: 17px;
-    min-width: 17px;
-    min-height: 17px;
-    height: 17px;
+    width: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    height: 18px;
     border-radius: 4px;
     opacity: 0;
   }
 
+  .tab.active .close,
   .tab:hover .close {
-    opacity: 1;
+    opacity: 0.6;
   }
 
   .close:hover:not(:disabled) {
+    opacity: 1;
     background: var(--bg-active);
   }
 
@@ -154,6 +159,6 @@
   }
 
   .add:hover:not(:disabled) {
-    background: var(--bg-active);
+    background: var(--bg-hover);
   }
 </style>

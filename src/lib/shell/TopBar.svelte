@@ -1,241 +1,226 @@
 <!--
-  Unified window toolbar, TablePlus style. On macOS it sits inside the title bar
-  (titleBarStyle: Overlay), so it leaves room for the traffic lights and acts as
-  the window's drag region. The centred pill names the connection and database.
+  Window top bar. On macOS it sits inside the title bar (titleBarStyle: Overlay),
+  so it leaves room for the traffic lights and is the window's drag region.
 -->
 <script lang="ts">
-  import ContextMenu, { type MenuItem } from './ContextMenu.svelte'
-  import EngineBadge from '../ui/EngineBadge.svelte'
   import Icon from '../ui/Icon.svelte'
+  import { inspector } from '../stores/inspector.svelte'
   import { sessions } from '../stores/sessions.svelte'
-  import { tabs } from '../stores/tabs.svelte'
   import { theme } from '../stores/theme.svelte'
   import { ui } from '../stores/ui.svelte'
   import type { SessionInfo } from '../types'
-  import { ENGINE_LABEL, envColor } from '../util/env'
+  import { envColor } from '../util/env'
   import { isMac, modLabel } from '../util/format'
 
   interface Props {
-    session: SessionInfo
+    session: SessionInfo | null
   }
 
   let { session }: Props = $props()
 
-  let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null)
-  let isProd = $derived(session.config.env === 'production')
-  let database = $derived(sessions.database(session.sessionId))
-  let entry = $derived(sessions.schemaEntry(session.sessionId, database))
-  // Postgres/Mongo/SQLite versions already start with the product name; MySQL's ("8.4.6-MySQL") don't.
-  let version = $derived(
-    session.serverVersion.toLowerCase().startsWith(ENGINE_LABEL[session.config.engine].toLowerCase())
-      ? session.serverVersion
-      : `${ENGINE_LABEL[session.config.engine]} ${session.serverVersion.replace(/-(MySQL|MariaDB).*$/i, '')}`,
-  )
-
-  const envLabel = { local: 'local', development: 'dev', staging: 'staging', production: 'production' }
-
-  function openAt(e: MouseEvent, items: MenuItem[], alignRight = false) {
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
-    menu = { x: alignRight ? r.right - 200 : r.left, y: r.bottom + 4, items }
-  }
-
-  let appItems = $derived<MenuItem[]>([
-    { label: 'Keyboard shortcuts', hint: `${modLabel}/`, onclick: () => (ui.shortcutsHelp = true) },
-    {
-      label: `Theme: ${theme.mode === 'system' ? 'System' : theme.mode === 'dark' ? 'Dark' : 'Light'}`,
-      hint: `${modLabel}⇧L`,
-      onclick: () => theme.toggle(),
-    },
-    { label: 'Use system theme', disabled: theme.mode === 'system', onclick: () => theme.set('system') },
-    { separator: true },
-    { label: 'About / Check for updates…', onclick: () => (ui.about = true) },
-  ])
-
-  let pillItems = $derived<MenuItem[]>([
-    ...sessions.list.map((s) => ({
-      label: s.sessionId === session.sessionId ? `✓ ${s.config.name}` : `   ${s.config.name}`,
-      onclick: () => sessions.activate(s.sessionId),
-    })),
-    { separator: true },
-    { label: 'Open another connection…', hint: `${modLabel}K`, onclick: () => (sessions.view = 'connections') },
-    { label: 'Disconnect', danger: true, onclick: () => sessions.close(session.sessionId) },
-  ])
+  let dark = $derived(theme.isDark)
 </script>
 
-<header class="toolbar" class:mac={isMac} class:prod={isProd} style:--env={envColor(session.config)} data-tauri-drag-region>
-  <div class="group" data-tauri-drag-region>
-    <button class="tb" title="Connections ({modLabel}K)" aria-label="Connections" onclick={() => (sessions.view = 'connections')}>
-      <Icon name="server" size={15} />
-    </button>
-    <button
-      class="tb"
-      title={entry.loading ? 'Refreshing…' : 'Refresh schema'}
-      aria-label="Refresh schema"
-      class:spin={entry.loading}
-      onclick={() => sessions.refreshSchema(session.sessionId, database)}
-    >
-      <Icon name="refresh" size={15} />
+<header class="topbar" class:mac={isMac} data-tauri-drag-region>
+  <div class="brand" data-tauri-drag-region>
+    <span class="mark"><Icon name="pulse" size={18} strokeWidth={1.5} /></span>
+    <b>table<span>soft</span></b>
+  </div>
+
+  <span class="crumb-sep" aria-hidden="true"></span>
+  <div class="crumbs" data-tauri-drag-region>
+    <Icon name="layers" size={13} />
+    <button class="link" onclick={() => (sessions.view = 'connections')}>Connections</button>
+    {#if session}
+      <Icon name="chevron-right" size={11} />
+      <span class="conn" style:--env={envColor(session.config)}>
+        <i class="env-dot"></i>{session.config.name}
+      </span>
+    {/if}
+  </div>
+
+  <div class="center" data-tauri-drag-region>
+    <button class="command" onclick={() => (ui.palette = true)}>
+      <Icon name="search" size={13} />
+      <span>Search tables, queries, commands…</span>
+      <kbd>{modLabel} K</kbd>
     </button>
   </div>
 
-  <button class="pill" title="{version} · switch connection" onclick={(e) => openAt(e, pillItems)}>
-    <span class="tag">{envLabel[session.config.env]}</span>
-    <EngineBadge engine={session.config.engine} size={16} />
-    <span class="ver">{version}</span>
-    <span class="colon">:</span>
-    <b class="name">{session.config.name}</b>
-    {#if database}<span class="colon">:</span><span class="db">{database}</span>{/if}
-    {#if session.config.readOnly}<span class="lock" title="Read-only"><Icon name="lock" size={11} /></span>{/if}
-  </button>
-
-  <div class="group right" data-tauri-drag-region>
-    <button
-      class="tb"
-      title="New query ({modLabel}T)"
-      aria-label="New query"
-      onclick={() => tabs.newQuery(session.sessionId, database)}
-    >
-      <Icon name="query" size={15} />
-      <span>SQL</span>
+  <div class="actions">
+    <button class="ib" title="Toggle light / dark ({modLabel}⇧L)" aria-label="Toggle appearance" onclick={() => theme.set(dark ? 'light' : 'dark')}>
+      <Icon name={dark ? 'sun' : 'moon'} size={16} />
     </button>
-    <button class="tb" aria-label="Menu" title="Menu" onclick={(e) => openAt(e, appItems, true)}>
-      <Icon name="more" size={15} />
+    {#if session}
+      <button class="ib" class:on={inspector.open} title="Toggle row inspector" aria-label="Toggle row inspector" onclick={() => inspector.toggle()}>
+        <Icon name="panel" size={16} />
+      </button>
+    {/if}
+    <button class="ib" title="Keyboard shortcuts ({modLabel}/)" aria-label="Keyboard shortcuts" onclick={() => (ui.shortcutsHelp = true)}>
+      <Icon name="command" size={16} />
     </button>
   </div>
 </header>
 
-{#if menu}
-  <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
-{/if}
-
 <style>
-  .toolbar {
-    position: relative;
+  .topbar {
+    height: 54px;
+    min-height: 54px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    height: 46px;
-    padding: 0 10px;
-    flex: none;
+    gap: 17px;
+    padding: 0 17px;
     background: var(--bg-chrome);
-    border-bottom: 1px solid var(--border-strong);
+    border-bottom: 1px solid var(--border);
+    flex: none;
   }
 
   /* Room for the macOS traffic lights (titleBarStyle: Overlay). */
-  .toolbar.mac {
+  .topbar.mac {
     padding-left: 84px;
   }
 
-  .toolbar.prod {
-    background: color-mix(in srgb, var(--env) 12%, var(--bg-chrome));
-  }
-
-  .group {
+  .brand {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 10px;
+    white-space: nowrap;
+  }
+
+  .mark {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    background: var(--accent);
+    color: var(--accent-fg);
+    box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 16%, transparent);
+  }
+
+  .brand b {
+    font-size: 14px;
+    font-weight: 760;
+    letter-spacing: -0.045em;
+  }
+
+  .brand b span {
+    color: var(--accent);
+  }
+
+  :global(:root[data-theme='light']) .brand b span {
+    color: color-mix(in srgb, var(--accent) 70%, #2d3a12);
+  }
+
+  .crumb-sep {
+    width: 1px;
+    height: 18px;
+    background: var(--border-strong);
+  }
+
+  .crumbs {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--fg-muted);
+    font-size: 11px;
+    white-space: nowrap;
     min-width: 0;
+  }
+
+  .link {
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    color: inherit;
+    font-size: inherit;
+  }
+
+  .link:hover:not(:disabled) {
+    background: none;
+    color: var(--fg);
+  }
+
+  .conn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .env-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--env);
+    box-shadow: 0 0 7px color-mix(in srgb, var(--env) 50%, transparent);
+  }
+
+  .center {
     flex: 1;
+    display: flex;
+    justify-content: center;
+    min-width: 0;
   }
 
-  .group.right {
-    justify-content: flex-end;
-  }
-
-  .tb {
-    gap: 4px;
-    height: 26px;
-    min-height: 26px;
-    padding: 0 7px;
-    background: transparent;
-    border-color: transparent;
+  .command {
+    justify-content: flex-start;
+    gap: 8px;
+    width: 350px;
+    max-width: 100%;
+    height: 31px;
+    padding: 0 10px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    border-radius: 8px;
     box-shadow: none;
     color: var(--fg-muted);
-    font-size: 12px;
+    font-size: 11px;
   }
 
-  .tb:hover:not(:disabled) {
-    background: var(--bg-active);
+  .command span {
+    flex: 1;
+    text-align: left;
+  }
+
+  .command:hover:not(:disabled) {
+    background: var(--bg-input);
+    border-color: var(--border-input);
     color: var(--fg);
   }
 
-  .tb.spin :global(svg) {
-    animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  .pill {
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 56%;
-    height: 28px;
-    min-height: 28px;
+  .actions {
+    display: flex;
+    align-items: center;
     gap: 6px;
-    padding: 0 12px 0 5px;
+  }
+
+  .ib {
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
     border-radius: 7px;
-    background: var(--bg);
-    border: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-sm);
-    font-size: 12px;
     color: var(--fg-muted);
-    overflow: hidden;
   }
 
-  .pill:hover:not(:disabled) {
-    background: var(--bg);
-    border-color: var(--fg-faint);
-  }
-
-  .prod .pill {
-    border-color: var(--env);
-  }
-
-  .tag {
-    flex: none;
-    height: 18px;
-    line-height: 18px;
-    padding: 0 6px;
-    border-radius: 4px;
-    font-size: 10.5px;
-    font-weight: 600;
-    color: #fff;
-    background: var(--env);
-  }
-
-  .ver,
-  .db {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .ver {
-    flex: 0 2 auto;
-  }
-
-  .colon {
-    color: var(--fg-faint);
-  }
-
-  .name {
+  .ib:hover:not(:disabled),
+  .ib.on {
     color: var(--fg);
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    background: var(--bg-hover);
   }
 
-  .db {
-    color: var(--fg);
-  }
-
-  .lock {
-    display: inline-flex;
-    color: var(--warning);
+  @media (max-width: 1120px) {
+    .crumbs,
+    .crumb-sep {
+      display: none;
+    }
   }
 </style>

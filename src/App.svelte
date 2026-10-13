@@ -5,7 +5,9 @@
   import ExportDialog from './lib/dialogs/ExportDialog.svelte'
   import ImportDialog from './lib/dialogs/ImportDialog.svelte'
   import AboutDialog from './lib/shell/AboutDialog.svelte'
-  import QuickOpen from './lib/shell/QuickOpen.svelte'
+  import CommandPalette from './lib/shell/CommandPalette.svelte'
+  import SettingsDialog from './lib/shell/SettingsDialog.svelte'
+  import { api } from './lib/api'
   import ShortcutsHelp from './lib/shell/ShortcutsHelp.svelte'
   import Toasts from './lib/shell/Toasts.svelte'
   import { handleShortcut } from './lib/shell/shortcuts'
@@ -19,8 +21,11 @@
   // Browser preview only (src/dev/mockTauri.ts): stand-ins for the macOS window controls.
   const fakeLights = import.meta.env.DEV && (window as unknown as { __TABLESOFT_MOCK__?: boolean }).__TABLESOFT_MOCK__ === true
 
+  let appVersion = $state('')
+
   onMount(() => {
     void connections.load()
+    api.appInfo().then((i) => (appVersion = i.version), () => {})
   })
 
   function onKeydown(e: KeyboardEvent) {
@@ -47,7 +52,7 @@
   {#if sessions.view === 'connections' || !sessions.active}
     <Welcome />
   {/if}
-  <Workspace visible={sessions.view === 'workspace' && !!sessions.active} />
+  <Workspace visible={sessions.view === 'workspace' && !!sessions.active} {appVersion} />
 </div>
 
 {#if ui.exportRequest}
@@ -58,9 +63,14 @@
   {@const r = ui.importRequest}
   <ImportDialog session={r.session} table={r.table} onClose={() => (ui.importRequest = null)} />
 {/if}
-{#if ui.quickOpen}
-  <QuickOpen onClose={() => (ui.quickOpen = false)} />
+{#if ui.palette}
+  <CommandPalette onClose={() => (ui.palette = false)} />
 {/if}
+
+{#if ui.settings}
+  <SettingsDialog onClose={() => (ui.settings = false)} />
+{/if}
+
 {#if ui.shortcutsHelp}
   <ShortcutsHelp onClose={() => (ui.shortcutsHelp = false)} />
 {/if}

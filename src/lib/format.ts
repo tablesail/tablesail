@@ -152,3 +152,16 @@ export function valueToEditText(value: Value | undefined): string {
   if ('$oid' in value) return value.$oid
   return value.type === DEFAULT_MARKER_TYPE ? '' : value.$other
 }
+
+/**
+ * Colour family for a status-like enum value, so the grid can show it as a badge:
+ * good (green), warn (amber), bad (red), info (blue) or neutral.
+ */
+export function statusTone(text: string): 'good' | 'warn' | 'bad' | 'info' | 'neutral' {
+  const t = text.toLowerCase()
+  if (/^(active|paid|ok|success|succeeded|done|complete|completed|approved|enabled|open|online|happy|yes|healthy|live|published)$/.test(t)) return 'good'
+  if (/^(pending|paused|waiting|draft|queued|processing|review|trial|warning|ok?ay)$/.test(t)) return 'warn'
+  if (/^(failed|error|refunded|cancel(l)?ed|rejected|blocked|banned|deleted|disabled|closed|offline|sad|expired|overdue)$/.test(t)) return 'bad'
+  if (/^(shipped|sent|new|scheduled|running|in[_ ]progress|delivered)$/.test(t)) return 'info'
+  return 'neutral'
+}

@@ -1,4 +1,4 @@
-import type { TableRef } from '../types'
+import type { Filter, TableRef } from '../types'
 
 export interface TableTab {
   id: string
@@ -6,6 +6,8 @@ export interface TableTab {
   sessionId: string
   table: TableRef
   title: string
+  /** Filters to apply when the tab first loads (e.g. "View related" from the inspector). */
+  filters?: Filter[]
 }
 
 export interface QueryTab {
@@ -46,9 +48,10 @@ class TabsStore {
     if (tab) this.activeBySession[tab.sessionId] = id
   }
 
-  openTable(sessionId: string, table: TableRef): TableTab {
+  openTable(sessionId: string, table: TableRef, filters?: Filter[]): TableTab {
     const existing = this.list.find(
-      (t): t is TableTab => t.kind === 'table' && t.sessionId === sessionId && sameTable(t.table, table),
+      (t): t is TableTab =>
+        t.kind === 'table' && t.sessionId === sessionId && sameTable(t.table, table) && !t.filters?.length && !filters?.length,
     )
     if (existing) {
       this.select(existing.id)
@@ -60,6 +63,7 @@ class TabsStore {
       sessionId,
       table: { ...table },
       title: table.name,
+      filters: filters?.length ? filters : undefined,
     }
     this.list.push(tab)
     this.select(tab.id)

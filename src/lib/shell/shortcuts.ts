@@ -24,8 +24,7 @@ export function handleShortcut(e: KeyboardEvent): boolean {
   if (!mod || e.altKey) return false
 
   if (lower === 'k' && !e.shiftKey) {
-    if (sessions.view === 'workspace') sessions.view = 'connections'
-    else if (sessions.activeId) sessions.view = 'workspace'
+    ui.palette = !ui.palette
     return true
   }
   if (lower === 'l' && e.shiftKey) {
@@ -48,7 +47,7 @@ export function handleShortcut(e: KeyboardEvent): boolean {
     return true
   }
   if (lower === 'p' && !e.shiftKey) {
-    ui.quickOpen = true
+    ui.palette = true
     return true
   }
   if (/^[1-9]$/.test(key) && !e.shiftKey) {

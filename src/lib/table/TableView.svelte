@@ -38,6 +38,10 @@
   import { toFilters, type FilterRow } from './filters'
   import FilterBar from './FilterBar.svelte'
   import StructureView from './StructureView.svelte'
+  import RelationsView from './RelationsView.svelte'
+  import { inspector } from '../stores/inspector.svelte'
+  import { pulse } from '../stores/pulse.svelte'
+  import { tabs } from '../stores/tabs.svelte'
   import RowMenu from './RowMenu.svelte'
   import type { RowMenuItem } from './menu'
   import CellEditor from './editors/CellEditor.svelte'
@@ -49,11 +53,15 @@
     session: SessionInfo
     table: TableRef
     active: boolean
+    /** Tab id, so the inspector knows which view published the row. */
+    tabId?: string
+    /** Filters applied on first load (e.g. "View related" from the inspector). */
+    initialFilters?: Filter[]
     onExport?: (request: BrowseRequest) => void
     onImport?: (table: TableRef) => void
   }
 
-  let { session, table, active, onExport, onImport }: Props = $props()
+  let { session, table, active, tabId = '', initialFilters, onExport, onImport }: Props = $props()
 
   const PAGE_SIZE = 200
   const MAX_PAGES = 100
@@ -67,7 +75,8 @@
 
   type CountState = 'pending' | 'exact' | 'estimate' | 'unknown'
 
-  let tab = $state<'data' | 'structure'>('data')
+  let tab = $state<'data' | 'structure' | 'relations'>('data')
+  let quick = $state('')
   let structure = $state.raw<TableStructure | null>(null)
   let structureError = $state<string | null>(null)
   let columns = $state.raw<ColumnMeta[]>([])
@@ -261,6 +270,7 @@
       if (gen !== dataGen) return
       lastMs = page.elapsedMs
       lastQuery = page.query
+      pulse.record(sid, page.elapsedMs)
       if (idx === 0 || columns.length === 0 || page.columns.length !== columns.length) setColumns(page.columns)
       loadError = null
       loading = false
@@ -332,7 +342,8 @@
     matchAll = true
     rawMode = false
     rawWhere = ''
-    applied = { filters: [], matchAll: true, rawWhere: null }
+    applied = { filters: initialFilters ? [...initialFilters] : [], matchAll: true, rawWhere: null }
+    quick = ''
     showFilters = false
     selection = null
     viewer = null
@@ -406,6 +417,50 @@
     matchAll = true
     applyFilters()
   }
+
+  // Quick "Filter rows…" box: substring match on every text-like column, pushed down to the server.
+  const QUICK_FAMILIES = new Set(['text', 'enum', 'uuid', 'objectId', 'json', 'date', 'dateTime', 'other'])
+
+  function applyQuick() {
+    const q = quick.trim()
+    const cols = columns.filter((c) => QUICK_FAMILIES.has(c.family)).map((c) => c.name)
+    applied = q && cols.length
+      ? { filters: cols.map((column) => ({ column, op: 'contains' as const, value: q })), matchAll: false, rawWhere: null }
+      : { filters: [], matchAll: true, rawWhere: null }
+    filterRows = []
+    rawMode = false
+    resetData(false)
+    grid?.scrollToRow(0)
+  }
+
+  function openRelated(ref: TableRef) {
+    tabs.openTable(session.sessionId, ref)
+  }
+
+  // Publish the focused row to the Row inspector while this tab is visible.
+  $effect(() => {
+    void rev
+    void store.version
+    const sel = selection
+    if (!active || !tabId || tab !== 'data' || !sel || columns.length === 0) return
+    const row = getRow(sel.activeRow)
+    if (!row) return
+    inspector.show({
+      tabId,
+      session,
+      table,
+      columns,
+      row,
+      rowIndex: sel.activeRow,
+      primaryKey: structure?.primaryKey ?? [],
+      foreignKeys: structure?.foreignKeys ?? [],
+      editable,
+    })
+  })
+
+  onDestroy(() => {
+    if (tabId) inspector.clear(tabId)
+  })
 
   async function toggleFilters() {
     showFilters = !showFilters
@@ -909,6 +964,64 @@
 <svelte:window onkeydown={onWindowKey} />
 
 <div class="tv">
+  <div class="head">
+    <div class="crumbs">
+      <Icon name="database" size={12} />
+      <span>{session.config.name}</span>
+      {#if table.schema}<Icon name="chevron-right" size={10} /><span>{table.schema}</span>{/if}
+      <Icon name="chevron-right" size={10} />
+      <b>{table.name}</b>
+    </div>
+    <div class="headrow">
+      <h1 title={table.name}>{table.name}</h1>
+      <span class="note">{countText}</span>
+      {#if structure && structure.kind !== 'table' && structure.kind !== 'collection'}<span class="note">{structure.kind === 'materializedView' ? 'materialized view' : structure.kind}</span>{/if}
+      <span class="grow"></span>
+      <div class="seg" role="tablist">
+        <button role="tab" aria-selected={tab === 'data'} class:on={tab === 'data'} onclick={() => (tab = 'data')}>Data</button>
+        <button role="tab" aria-selected={tab === 'structure'} class:on={tab === 'structure'} onclick={() => (tab = 'structure')}>Structure</button>
+        <button role="tab" aria-selected={tab === 'relations'} class:on={tab === 'relations'} onclick={() => (tab = 'relations')}>Relations</button>
+      </div>
+      <button class="outline" disabled={!onExport} onclick={() => onExport?.(request)}><Icon name="export" size={13} /> Export</button>
+    </div>
+  </div>
+
+  {#if tab === 'data'}
+    <div class="rtool">
+      <div class="rhead"><Icon name="table" size={15} /> Results</div>
+      <span class="chip">{countText}{store.insertCount > 0 ? ` + ${store.insertCount} new` : ''}</span>
+      {#if lastMs !== null}<span class="chip ok">● {lastMs < 1 ? '<1' : Math.round(lastMs)} ms</span>{/if}
+      {#if !store.isEmpty}
+        <div class="changes">
+          <span class="pending-label">{store.pending} change{store.pending === 1 ? '' : 's'}</span>
+          <button class="bt" onclick={previewSql}>Preview SQL</button>
+          <button class="bt" disabled={committing} onclick={discard}>Discard</button>
+          <button class="primary sm" disabled={committing || !structure} title="Commit (⌘S)" onclick={requestCommit}>
+            {committing ? 'Committing…' : 'Commit'}
+          </button>
+        </div>
+      {/if}
+      <span class="grow"></span>
+      <label class="quick">
+        <Icon name="search" size={13} />
+        <input
+          type="search"
+          placeholder="Filter rows…"
+          bind:value={quick}
+          spellcheck="false"
+          onkeydown={(e) => e.key === 'Enter' && applyQuick()}
+          oninput={() => quick === '' && applied.filters.length > 0 && applyQuick()}
+        />
+      </label>
+      <button class="ib" class:on={showFilters || (appliedCount > 0 && !quick)} title="Advanced filters (⌘F)" aria-label="Advanced filters" onclick={toggleFilters}>
+        <Icon name="filter" size={15} />{#if appliedCount > 0 && !quick}<span class="count">{appliedCount}</span>{/if}
+      </button>
+      <button class="ib" disabled={!editable} title="Add a row" aria-label="Add a row" onclick={addRow}><Icon name="plus" size={15} /></button>
+      <button class="ib" disabled={!editable || !selection} title="Delete selected rows (Delete)" aria-label="Delete selected rows" onclick={deleteSelected}><Icon name="trash" size={15} /></button>
+      <button class="ib" title="Refresh (⌘R)" aria-label="Refresh" onclick={refresh}><Icon name="refresh" size={15} /></button>
+      <button class="ib" disabled={importDisabled} title="Import CSV…" aria-label="Import CSV" onclick={() => onImport?.(table)}><Icon name="import" size={15} /></button>
+    </div>
+  {/if}
   {#if readOnlyReason && tab === 'data'}
     <div class="banner info"><Icon name="lock" size={12} /> {readOnlyReason}</div>
   {/if}
@@ -971,6 +1084,16 @@
       {/if}
     </div>
 
+    {#if tab === 'relations'}
+      <div class="pane">
+        {#if structure}
+          <RelationsView {structure} onOpen={openRelated} />
+        {:else}
+          <div class="center muted">Loading…</div>
+        {/if}
+      </div>
+    {/if}
+
     {#if tab === 'structure'}
       <div class="pane">
         {#if structure}
@@ -984,54 +1107,16 @@
     {/if}
   </div>
 
-  <div class="bottombar">
-    <div class="seg" role="tablist">
-      <button role="tab" aria-selected={tab === 'data'} class:on={tab === 'data'} onclick={() => (tab = 'data')}>Data</button>
-      <button role="tab" aria-selected={tab === 'structure'} class:on={tab === 'structure'} onclick={() => (tab = 'structure')}>Structure</button>
+  {#if tab === 'data'}
+    <div class="foot">
+      <span>
+        {#if loadError}<span class="err">Query failed</span>{:else if loading}Loading…{:else}<b>{countText}</b> · {lastMs !== null ? `loaded in ${Math.round(lastMs)} ms` : 'ready'}{/if}
+        {#if selectionText} · {selectionText}{/if}
+        {#if flash}<span class:err={flash.error} class="flash"> · {flash.text}</span>{/if}
+      </span>
+      <span class="sql" title={lastQuery}>{lastQuery}</span>
     </div>
-
-    {#if tab === 'data'}
-      <button class="bb" disabled={!editable} title="Add a row" onclick={addRow}><Icon name="plus" size={12} strokeWidth={1.8} /> Row</button>
-      <button
-        class="bb icon-only"
-        disabled={!editable || !selection}
-        title="Delete the selected rows (Delete)"
-        aria-label="Delete selected rows"
-        onclick={deleteSelected}><Icon name="trash" size={13} /></button
-      >
-    {/if}
-
-    <div class="info" title={tab === 'data' ? lastQuery : ''}>
-      {#if tab === 'data'}
-        <span>{countText}{store.insertCount > 0 ? ` + ${store.insertCount} new` : ''}</span>
-        {#if lastMs !== null}<span class="dim">{lastMs < 1 ? '<1' : Math.round(lastMs)} ms</span>{/if}
-        {#if selectionText}<span class="dim">{selectionText}</span>{/if}
-      {:else}
-        <span>{structure ? `${structure.columns.length} columns` : ''}</span>
-      {/if}
-      {#if flash}<span class:err={flash.error} class="flash">{flash.text}</span>{/if}
-    </div>
-
-    {#if tab === 'data' && !store.isEmpty}
-      <div class="changes">
-        <span class="pending-label">{store.pending} change{store.pending === 1 ? '' : 's'}</span>
-        <button class="bb" onclick={previewSql}>Preview</button>
-        <button class="bb" disabled={committing} onclick={discard}>Discard</button>
-        <button class="primary small" disabled={committing || !structure} title="Commit (⌘S)" onclick={requestCommit}>
-          {committing ? 'Committing…' : 'Commit'}
-        </button>
-      </div>
-    {/if}
-
-    {#if tab === 'data'}
-      <button class="bb" class:on={showFilters || appliedCount > 0} title="Filter (⌘F)" onclick={toggleFilters}>
-        <Icon name="filter" size={12} /> Filters{#if appliedCount > 0}<span class="count">{appliedCount}</span>{/if}
-      </button>
-      <button class="bb icon-only" title="Refresh (⌘R)" aria-label="Refresh" onclick={refresh}><Icon name="refresh" size={13} /></button>
-    {/if}
-    <button class="bb icon-only" disabled={!onExport} title="Export…" aria-label="Export" onclick={() => onExport?.(request)}><Icon name="export" size={13} /></button>
-    <button class="bb icon-only" disabled={importDisabled} title="Import CSV…" aria-label="Import CSV" onclick={() => onImport?.(table)}><Icon name="import" size={13} /></button>
-  </div>
+  {/if}
 </div>
 
 {#if menu}
@@ -1163,7 +1248,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 12px;
+    padding: 7px 22px;
     font-size: 12px;
     border-bottom: 1px solid var(--border);
     flex: 0 0 auto;
@@ -1216,114 +1301,247 @@
     justify-content: center;
   }
 
-  .bottombar {
+  .head {
+    padding: 22px 25px 16px;
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+
+  .crumbs {
     display: flex;
     align-items: center;
-    gap: 4px;
-    height: 32px;
-    padding: 0 8px;
-    border-top: 1px solid var(--border-strong);
-    background: var(--bg-chrome);
-    font-size: 12px;
-    flex: 0 0 auto;
+    gap: 7px;
+    margin-bottom: 9px;
+    font-size: 10px;
+    color: var(--fg-faint);
+  }
+
+  .crumbs b {
+    font-weight: 500;
+    color: var(--fg-muted);
+  }
+
+  .headrow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 22px;
+    font-weight: 740;
+    letter-spacing: -0.045em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .note {
+    flex: none;
+    padding: 4px 7px;
+    border: 1px solid var(--border-strong);
+    border-radius: 5px;
+    font-size: 10px;
+    color: var(--fg-muted);
+    background: var(--bg-active);
     white-space: nowrap;
   }
 
-  .bottombar .seg {
-    margin-right: 6px;
+
+  .rtool {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 53px;
+    padding: 0 18px 0 22px;
+    flex: 0 0 auto;
   }
 
-  .bottombar .seg button {
-    min-height: 20px;
-    padding: 0 10px;
+  .rhead {
+    display: flex;
+    align-items: center;
+    gap: 9px;
     font-size: 12px;
+    font-weight: 720;
+    white-space: nowrap;
   }
 
-  .bb {
-    gap: 4px;
-    min-height: 22px;
-    height: 22px;
-    padding: 0 7px;
-    font-size: 12px;
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
-    color: var(--fg-muted);
-  }
-
-  .bb.icon-only {
-    width: 24px;
-    padding: 0;
-  }
-
-  .bb:hover:not(:disabled) {
-    background: var(--bg-active);
-    color: var(--fg);
-  }
-
-  .bb.on {
+  .rhead :global(svg) {
     color: var(--accent);
   }
 
-  .count {
-    min-width: 15px;
-    height: 15px;
-    padding: 0 4px;
-    border-radius: 8px;
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 15px;
-    text-align: center;
-    background: var(--accent);
-    color: var(--accent-fg);
+  :global(:root[data-theme='light']) .rhead :global(svg) {
+    color: color-mix(in srgb, var(--accent) 60%, #2d3a12);
   }
 
-  .info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    justify-content: center;
-    gap: 12px;
-    overflow: hidden;
-    color: var(--fg);
+  .chip {
+    flex: none;
+    padding: 4px 8px;
+    border: 1px solid var(--border-input);
+    border-radius: 5px;
+    font-size: 10px;
+    color: var(--fg-muted);
+    background: var(--bg-chip);
+    white-space: nowrap;
     font-variant-numeric: tabular-nums;
   }
 
-  .info .dim {
-    color: var(--fg-muted);
-  }
-
-  .info .flash {
+  .chip.ok {
     color: var(--success);
-  }
-
-  .info .flash.err {
-    color: var(--danger);
+    border-color: color-mix(in srgb, var(--success) 30%, transparent);
+    background: color-mix(in srgb, var(--success) 12%, transparent);
   }
 
   .changes {
     display: flex;
     align-items: center;
     gap: 2px;
-    margin-right: 6px;
-    padding: 0 2px 0 9px;
-    height: 24px;
-    border-radius: 6px;
-    background: color-mix(in srgb, var(--warning) 13%, transparent);
+    height: 28px;
+    padding: 0 2px 0 10px;
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
   }
 
   .pending-label {
     margin-right: 4px;
-    font-weight: 600;
+    font-size: 11px;
+    font-weight: 650;
     color: var(--warning);
     font-variant-numeric: tabular-nums;
   }
 
-  .primary.small {
-    min-height: 20px;
-    height: 20px;
+  .bt {
+    min-height: 24px;
+    height: 24px;
+    padding: 0 8px;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-size: 11px;
+    color: var(--fg-muted);
+  }
+
+  .bt:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--fg);
+  }
+
+  .primary.sm {
+    min-height: 24px;
+    height: 24px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+
+  .quick {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 220px;
+    min-width: 140px;
+    height: 29px;
     padding: 0 9px;
-    font-size: 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+    background: var(--bg-input);
+    color: var(--fg-muted);
+  }
+
+  .quick:focus-within {
+    border-color: var(--accent);
+  }
+
+  .quick input {
+    flex: 1;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-size: 11px;
+  }
+
+  .quick input:focus {
+    box-shadow: none;
+  }
+
+  .ib {
+    position: relative;
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    border-radius: 7px;
+    color: var(--fg-muted);
+  }
+
+  .ib:hover:not(:disabled),
+  .ib.on {
+    background: var(--bg-hover);
+    color: var(--fg);
+  }
+
+  .count {
+    position: absolute;
+    top: 1px;
+    right: 0;
+    min-width: 14px;
+    height: 14px;
+    padding: 0 3px;
+    border-radius: 7px;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    height: 38px;
+    min-height: 38px;
+    padding: 0 21px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--fg-muted);
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+
+  .foot b {
+    font-weight: 650;
+    color: var(--fg);
+  }
+
+  .foot .flash {
+    color: var(--success);
+  }
+
+  .foot .err,
+  .foot .flash.err {
+    color: var(--danger);
+  }
+
+  .foot .sql {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: var(--mono);
+    color: var(--fg-faint);
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   .sql-block {

@@ -45,7 +45,7 @@
 <script lang="ts">
   import { untrack, type Snippet } from 'svelte'
   import type { CellInput, ColumnMeta, Row, Sort } from '../types'
-  import { formatValue, valueToEditText } from '../format'
+  import { formatValue, valueToEditText, statusTone } from '../format'
   import type { EditMove, EditorContext, GridSelection } from './types'
   import {
     HEADER_H,
@@ -108,6 +108,16 @@
   const MAX_INITIAL_W = 400
   const MAX_RESIZE_W = 1600
   const ROW_OVERSCAN = 6
+  /** Compact type label for the header: "timestamp with time zone" → "timestamptz". */
+  function shortType(t: string): string {
+    const x = t.toLowerCase()
+    if (x.startsWith('timestamp with time zone')) return 'timestamptz'
+    if (x.startsWith('timestamp without time zone')) return 'timestamp'
+    if (x.startsWith('character varying')) return 'varchar'
+    if (x.startsWith('double precision')) return 'float8'
+    return x.replace(/\(.*\)$/, '')
+  }
+
   const COL_OVERSCAN_PX = 240
   const NEED_OVERSCAN = 60
   const MAX_COPY_CELLS = 250_000
@@ -256,7 +266,8 @@
   function headerWidth(c: number): number {
     const col = columns[c]
     const hint = columnHint?.(c)
-    return textWidth(col.name, true) + (hint ? textWidth(hint) + 14 : 0) + 34
+    // name + type label (≈10px font) + optional PK/FK badge + padding and sort arrow
+    return textWidth(col.name, true) + textWidth(shortType(col.typeName)) * 0.83 + 6 + (hint ? textWidth(hint) + 14 : 0) + 44
   }
 
   function clampInitial(w: number): number {
@@ -762,6 +773,8 @@
   bind:clientHeight={clientH}
   tabindex="0"
   role="grid"
+  style:--row-h="{ROW_H}px"
+  style:--head-h="{HEADER_H}px"
   aria-rowcount={rowCount}
   aria-colcount={nCols}
   onscroll={onScroll}
@@ -794,6 +807,7 @@
               onclick={() => headerClick(c)}
             >
               <span class="hname">{col.name}</span>
+              <span class="htype">{shortType(col.typeName)}</span>
               {#if hint}<span class="badge">{hint}</span>{/if}
               {#if srt}<span class="sort">{srt.descending ? '▼' : '▲'}</span>{/if}
               <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -834,7 +848,7 @@
         <div class="rows" style:width="{totalW}px" style:transform="translate({-scrollLeft}px, {-rowsShift}px)">
           {#each rowIdx as r (r)}
             {@const row = rowAt(r, revision)}
-            <div class="row {rowClass?.(r) ?? ''}" class:alt={r % 2 === 1}>
+            <div class="row {rowClass?.(r) ?? ''}" class:alt={r % 2 === 1} class:cur={selection?.activeRow === r}>
               {#each colIdx as c (c)}
                 {#if row}
                   {@const f = formatValue(row[c], columns[c].family)}
@@ -842,7 +856,9 @@
                     class="cell {f.cls} {cellClass?.(r, c) ?? ''}"
                     style:left="{colLeft[c]}px"
                     style:width="{effWidths[c]}px"
-                  >{f.text}</div>
+                  >
+                    {#if columns[c].family === 'enum' && typeof row[c] === 'string'}<span class="pill {statusTone(f.text)}">{f.text}</span>{:else}{f.text}{/if}
+                  </div>
                 {:else}
                   <div class="cell ph" style:left="{colLeft[c]}px" style:width="{effWidths[c]}px"></div>
                 {/if}
@@ -909,9 +925,9 @@
 <style>
   .grid {
     --g-line: var(--border);
-    --g-alt: var(--bg-alt);
-    --g-sel: var(--selection, rgb(10 102 216 / 0.16));
-    --g-head: color-mix(in srgb, var(--bg-chrome) 55%, var(--bg));
+    --g-alt: transparent;
+    --g-sel: var(--selection);
+    --g-head: var(--bg-head);
     --g-inserted: rgb(46 160 67 / 0.2);
     --g-deleted: rgb(229 72 77 / 0.18);
     --g-edited: rgb(212 160 23 / 0.3);
@@ -922,8 +938,8 @@
     overflow: auto;
     outline: none;
     background: var(--bg);
-    color: var(--fg);
-    font-size: 12px;
+    color: var(--fg-cell);
+    font-size: 11.5px;
     contain: layout paint;
   }
 
@@ -954,7 +970,7 @@
   .corner {
     top: 0;
     left: 0;
-    height: 26px;
+    height: var(--head-h);
     z-index: 4;
     display: flex;
     align-items: center;
@@ -969,7 +985,7 @@
   .header {
     top: 0;
     right: 0;
-    height: 26px;
+    height: var(--head-h);
     overflow: hidden;
     z-index: 3;
     background: var(--g-head);
@@ -988,7 +1004,7 @@
     position: absolute;
     top: 0;
     height: 100%;
-    padding: 0 8px;
+    padding: 0 14px;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1006,12 +1022,27 @@
   }
 
   .hname {
-    font-weight: 500;
-    color: var(--fg);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--fg-muted);
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 0 1 auto;
     min-width: 0;
+  }
+
+  .htype {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 9.5px;
+    font-weight: 500;
+    color: var(--fg-faint);
+  }
+
+  .h:hover .hname {
+    color: var(--accent);
   }
 
   .badge {
@@ -1042,7 +1073,7 @@
   }
 
   .gutter {
-    top: 26px;
+    top: var(--head-h);
     left: 0;
     bottom: 0;
     z-index: 2;
@@ -1056,11 +1087,12 @@
   }
 
   .g {
-    height: 24px;
-    line-height: 24px;
-    padding: 0 8px;
+    height: var(--row-h);
+    line-height: var(--row-h);
+    padding: 0 10px;
     text-align: right;
-    font-size: 11px;
+    font-family: var(--mono);
+    font-size: 10.5px;
     color: var(--fg-faint);
     font-variant-numeric: tabular-nums;
     border-bottom: var(--hair) solid var(--g-line);
@@ -1070,11 +1102,12 @@
 
   .g.on {
     color: var(--fg);
-    background: var(--g-sel);
+    background: var(--row-selected);
+    box-shadow: inset 3px 0 0 var(--accent);
   }
 
   .body {
-    top: 26px;
+    top: var(--head-h);
     right: 0;
     bottom: 0;
     overflow: hidden;
@@ -1091,7 +1124,7 @@
 
   .row {
     position: relative;
-    height: 24px;
+    height: var(--row-h);
   }
 
   .row.alt {
@@ -1100,6 +1133,11 @@
 
   .row:hover {
     background: var(--bg-hover);
+  }
+
+  .row.cur,
+  .row.cur:hover {
+    background: var(--row-selected);
   }
 
   .row.inserted {
@@ -1118,9 +1156,9 @@
   .cell {
     position: absolute;
     top: 0;
-    height: 24px;
-    line-height: 23px;
-    padding: 0 8px;
+    height: var(--row-h);
+    line-height: calc(var(--row-h) - 1px);
+    padding: 0 14px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1131,6 +1169,53 @@
 
   .cell.num {
     text-align: right;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 20px;
+    padding: 0 7px;
+    border-radius: 5px;
+    font-size: 10px;
+    font-weight: 640;
+    line-height: 20px;
+    vertical-align: middle;
+    color: var(--fg-muted);
+    background: color-mix(in srgb, var(--fg-muted) 16%, transparent);
+  }
+
+  .pill::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .pill.good {
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 16%, transparent);
+  }
+
+  .pill.warn {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 18%, transparent);
+  }
+
+  .pill.bad {
+    color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 16%, transparent);
+  }
+
+  .pill.info {
+    color: var(--info);
+    background: color-mix(in srgb, var(--info) 16%, transparent);
   }
 
   .cell.null,
@@ -1145,8 +1230,8 @@
 
   .cell.mono {
     font-family: var(--mono);
-    font-size: 11.5px;
-    color: color-mix(in srgb, var(--fg) 80%, transparent);
+    font-size: 10.5px;
+    color: var(--mono-fg);
   }
 
   .cell.bool.yes {
@@ -1181,7 +1266,8 @@
   .active {
     position: absolute;
     pointer-events: none;
-    border: 2px solid var(--accent);
+    border: 1.5px solid var(--accent);
+    border-radius: 2px;
     z-index: 3;
   }
 

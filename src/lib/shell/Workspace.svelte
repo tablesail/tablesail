@@ -6,8 +6,12 @@
   import Sidebar from '../sidebar/Sidebar.svelte'
   import QueryTab from '../editor/QueryTab.svelte'
   import TableView from '../table/TableView.svelte'
+  import Inspector from './Inspector.svelte'
+  import Rail from './Rail.svelte'
+  import StatusBar from './StatusBar.svelte'
   import TabBar from './TabBar.svelte'
   import TopBar from './TopBar.svelte'
+  import { inspector } from '../stores/inspector.svelte'
   import { sessions } from '../stores/sessions.svelte'
   import { tabs } from '../stores/tabs.svelte'
   import { ui } from '../stores/ui.svelte'
@@ -15,19 +19,20 @@
 
   interface Props {
     visible: boolean
+    appVersion: string
   }
 
-  let { visible }: Props = $props()
+  let { visible, appVersion }: Props = $props()
 
   const WIDTH_KEY = 'tablesoft.sidebarWidth'
   function readWidth(): number {
     try {
       const n = Number(localStorage.getItem(WIDTH_KEY))
-      if (n >= 160 && n <= 600) return n
+      if (n >= 180 && n <= 600) return n
     } catch {
       // ignore
     }
-    return 250
+    return 236
   }
 
   let sidebarWidth = $state(readWidth())
@@ -40,7 +45,7 @@
     const el = e.currentTarget as HTMLElement
     el.setPointerCapture(e.pointerId)
     const move = (ev: PointerEvent) => {
-      sidebarWidth = Math.min(600, Math.max(160, ev.clientX))
+      sidebarWidth = Math.min(600, Math.max(180, ev.clientX - 55))
     }
     const up = () => {
       el.removeEventListener('pointermove', move)
@@ -59,7 +64,11 @@
 <div class="workspace" hidden={!visible || !session}>
   {#if session}
     <TopBar {session} />
-    <div class="body" style:grid-template-columns="{sidebarWidth}px 1px 1fr">
+    <div
+      class="body"
+      style:grid-template-columns="55px {sidebarWidth}px 1px minmax(0, 1fr) {inspector.open ? '254px' : '0px'}"
+    >
+      <Rail {session} />
       {#key session.sessionId}
         <Sidebar {session} />
       {/key}
@@ -77,6 +86,8 @@
                   <TableView
                     session={s}
                     table={tab.table}
+                    tabId={tab.id}
+                    initialFilters={tab.filters}
                     active={shown}
                     onExport={(request) => ui.exportTable(s, request)}
                     onImport={(table) => ui.importInto(s, table)}
@@ -113,7 +124,13 @@
           {/if}
         </div>
       </section>
+      {#if inspector.open}
+        <Inspector {session} activeTabId={activeTab?.id ?? null} />
+      {:else}
+        <span></span>
+      {/if}
     </div>
+    <StatusBar {session} {appVersion} />
   {/if}
 </div>
 
@@ -132,12 +149,26 @@
     flex: 1;
     min-height: 0;
     display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    overflow: hidden;
+    background: var(--bg-chrome);
+  }
+
+  @media (max-width: 1120px) {
+    .body {
+      grid-template-columns: 55px 213px 1px minmax(0, 1fr) 0 !important;
+    }
+
+    .body > :global(.inspector) {
+      display: none;
+    }
   }
 
   .resize {
     position: relative;
     cursor: col-resize;
     background: var(--border);
+    min-height: 0;
     touch-action: none;
     z-index: 2;
   }
@@ -158,6 +189,7 @@
     flex-direction: column;
     min-width: 0;
     min-height: 0;
+    background: var(--bg);
   }
 
   .tabs {

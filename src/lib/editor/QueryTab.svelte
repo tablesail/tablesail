@@ -10,6 +10,11 @@
   import { sessions } from '../stores/sessions.svelte'
   import type { QueryTab } from '../stores/tabs.svelte'
   import { ui } from '../stores/ui.svelte'
+  import { history } from '../stores/history.svelte'
+  import { pulse } from '../stores/pulse.svelte'
+  import { saved } from '../stores/saved.svelte'
+  import { inspector } from '../stores/inspector.svelte'
+  import { ENGINE_LABEL } from '../util/env'
   import type { SessionInfo, StatementSpan } from '../types'
   import { bytesToUtf16Many } from '../util/utf8'
   import { formatDuration, modLabel } from '../util/format'
@@ -29,6 +34,7 @@
   let frac = $state(0.45)
   let confirm = $state<{ sql: string; destructive: StatementSpan[] } | null>(null)
   let notice = $state<string | null>(null)
+  let saving = $state<{ name: string } | null>(null)
 
   let engine = $derived(session.config.engine)
   let entry = $derived(sessions.schemaEntry(session.sessionId, tab.database))
@@ -50,6 +56,7 @@
 
   onDestroy(() => {
     void runner.close()
+    inspector.clear(tab.id)
   })
 
   /** The statement containing the cursor; between statements, the one before it. */
@@ -103,6 +110,47 @@
   async function start(sql: string) {
     confirm = null
     await runner.run(session.sessionId, tab.database, sql)
+    const st = runner.status
+    const ok = !runner.runError && !(st?.statements.some((x) => x.state === 'error') ?? false)
+    history.add({
+      sql,
+      connectionId: session.config.id,
+      connectionName: session.config.name,
+      database: tab.database,
+      elapsedMs: runner.elapsedMs,
+      ok,
+    })
+    if (ok) pulse.record(session.sessionId, runner.elapsedMs)
+  }
+
+  const FORMAT_LANG = { postgres: 'postgresql', mysql: 'mysql', mariadb: 'mariadb', sqlite: 'sqlite' } as const
+
+  async function formatSql() {
+    if (!editor || engine === 'mongodb') return
+    try {
+      const { format } = await import('sql-formatter')
+      const sel = editor.getSelection()
+      const text = editor.getText()
+      const out = format(sel ? sel.text : text, { language: FORMAT_LANG[engine], keywordCase: 'upper', tabWidth: 2 })
+      editor.setText(sel ? text.slice(0, sel.from) + out + text.slice(sel.to) : out)
+    } catch (e) {
+      notice = `Could not format: ${errorMessage(e)}`
+    }
+  }
+
+  function saveQuery() {
+    const text = editor?.getText() ?? tab.sql
+    if (!text.trim()) return
+    saving = { name: tab.title.startsWith('Query ') ? '' : tab.title }
+  }
+
+  function confirmSave() {
+    if (!saving) return
+    const name = saving.name.trim() || `Query ${new Date().toLocaleString()}`
+    saved.add({ name, sql: editor?.getText() ?? tab.sql, connectionId: session.config.id, database: tab.database })
+    tab.title = name
+    saving = null
+    ui.toast(`Saved “${name}”`, 'success')
   }
 
   function onSplitDown(e: PointerEvent) {
@@ -139,14 +187,8 @@
 
 <div class="query" bind:this={container}>
   <div class="toolbar">
-    {#if runner.running}
-      <button class="danger" onclick={() => runner.cancel()} title="Cancel the running query"><Icon name="stop" size={11} strokeWidth={2} /> Stop</button>
-    {:else}
-      <button class="primary" onclick={() => execute(false)} title="Run the statement under the cursor ({modLabel}↵)">
-        <Icon name="play" size={11} strokeWidth={2} /> Run
-      </button>
-    {/if}
-    <button class="tool" onclick={() => execute(true)} disabled={runner.running} title="Run the whole script (⇧{modLabel}↵)"><Icon name="play-all" size={13} /> Run all</button>
+    <div class="title"><Icon name="code" size={14} /> SQL Editor</div>
+    <span class="meta">{ENGINE_LABEL[engine]} · {session.config.readOnly ? 'Read only' : session.config.env}</span>
     <span class="status" class:err={!!notice || !!runner.runError}>{notice ?? summary}</span>
     <span class="spacer"></span>
     <label class="db" title="Database">
@@ -160,6 +202,18 @@
         {/if}
       </select>
     </label>
+    {#if engine !== 'mongodb'}
+      <button class="bare" onclick={formatSql} title="Format SQL"><Icon name="bolt" size={13} /> Format</button>
+    {/if}
+    <button class="bare" onclick={saveQuery} title="Save to saved queries"><Icon name="star" size={13} /> Save</button>
+    <button class="bare" onclick={() => execute(true)} disabled={runner.running} title="Run the whole script (⇧{modLabel}↵)"><Icon name="play-all" size={13} /> Run all</button>
+    {#if runner.running}
+      <button class="danger run" onclick={() => runner.cancel()} title="Cancel the running query"><Icon name="stop" size={11} strokeWidth={2} /> Stop</button>
+    {:else}
+      <button class="primary run" onclick={() => execute(false)} title="Run the statement under the cursor ({modLabel}↵)">
+        <Icon name="play" size={11} strokeWidth={2} /> Run query <span class="kbd">{modLabel}↵</span>
+      </button>
+    {/if}
   </div>
 
   <div class="pane editor" style:height="{frac * 100}%">
@@ -176,9 +230,24 @@
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="split" onpointerdown={onSplitDown}></div>
   <div class="pane results">
-    <ResultsPanel {runner} onExport={exportResult} />
+    <ResultsPanel {runner} onExport={exportResult} tabId={tab.id} {session} {active} />
   </div>
 </div>
+
+{#if saving}
+  {@const sv = saving}
+  <Modal title="Save query" onClose={() => (saving = null)} width="420px">
+    <label class="save">
+      <span class="muted">Name</span>
+      <!-- svelte-ignore a11y_autofocus -->
+      <input type="text" bind:value={sv.name} placeholder="Revenue by month" autofocus onkeydown={(e) => e.key === 'Enter' && confirmSave()} />
+    </label>
+    {#snippet footer()}
+      <button onclick={() => (saving = null)}>Cancel</button>
+      <button class="primary" onclick={confirmSave}>Save</button>
+    {/snippet}
+  </Modal>
+{/if}
 
 {#if confirm}
   {@const pending = confirm}
@@ -209,28 +278,72 @@
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 6px;
-    height: 40px;
-    padding: 0 8px;
+    gap: 11px;
+    min-height: 46px;
+    padding: 0 16px 0 24px;
     border-bottom: 1px solid var(--border);
     flex: none;
   }
 
-  .tool {
-    background: transparent;
-    border-color: transparent;
+  .title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg);
+    white-space: nowrap;
+  }
+
+  .title :global(svg) {
+    color: var(--violet);
+  }
+
+  .meta {
+    font-size: 10px;
+    color: var(--fg-faint);
+    white-space: nowrap;
+  }
+
+  .bare {
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 7px;
+    border: none;
+    background: none;
     box-shadow: none;
+    font-size: 11px;
     color: var(--fg-muted);
   }
 
-  .tool:hover:not(:disabled) {
+  .bare:hover:not(:disabled) {
+    background: none;
     color: var(--fg);
+  }
+
+  .run {
+    gap: 7px;
+    min-height: 30px;
+    padding: 0 12px;
+    border-radius: 6px;
+    font-size: 11px;
+  }
+
+  .kbd {
+    margin-left: 4px;
+    font-size: 9px;
+    opacity: 0.6;
+  }
+
+  .save {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
   }
 
   .status {
     color: var(--fg-muted);
-    font-size: 12px;
-    margin-left: 6px;
+    font-size: 10px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -252,6 +365,8 @@
   }
 
   .db select {
+    min-height: 28px;
+    font-size: 11px;
     color: var(--fg);
   }
 

@@ -4,13 +4,22 @@
   import type { QueryRunner } from './runner.svelte'
   import type { StatementStatus } from '../types'
   import { formatCount, formatDuration } from '../util/format'
+  import { inspector } from '../stores/inspector.svelte'
+  import type { SessionInfo } from '../types'
+  import type { GridSelection } from '../grid/types'
 
   interface Props {
     runner: QueryRunner
     onExport: (sql: string) => void
+    /** For the Row inspector: which tab and session these results belong to. */
+    tabId?: string
+    session?: SessionInfo
+    active?: boolean
   }
 
-  let { runner, onExport }: Props = $props()
+  let { runner, onExport, tabId = '', session, active = false }: Props = $props()
+
+  let gridSel = $state.raw<GridSelection | null>(null)
 
   interface SetTab {
     key: string
@@ -75,6 +84,28 @@
     if (s.affected != null) return `${formatCount(s.affected)} rows affected`
     return STATE_LABEL[s.state]
   }
+
+  // Publish the focused result row to the Row inspector while this tab is visible.
+  $effect(() => {
+    void runner.revision
+    const sel = gridSel
+    const set = activeSet
+    if (!active || !tabId || !session || !sel || !set) return
+    const info = runner.info(set.stmt, set.set)
+    const row = runner.getRow(set.stmt, set.set, sel.activeRow)
+    if (!row) return
+    inspector.show({
+      tabId,
+      session,
+      table: null,
+      columns: info.columns,
+      row,
+      rowIndex: sel.activeRow,
+      primaryKey: [],
+      foreignKeys: [],
+      editable: false,
+    })
+  })
 </script>
 
 <div class="results">
@@ -105,6 +136,7 @@
             getRow={(i) => runner.getRow(activeSet.stmt, activeSet.set, i)}
             onNeedRows={(a, b) => runner.needRows(activeSet.stmt, activeSet.set, a, b)}
             revision={runner.revision}
+            onSelectionChange={(sel) => (gridSel = sel)}
           />
         {/key}
       </div>
@@ -117,7 +149,7 @@
         {/if}
         {#if info.failed}<span class="error-text" title={info.failed}>Fetch failed: {info.failed}</span>{/if}
         <span class="spacer"></span>
-        <button class="ghost" onclick={() => onExport(activeSet.sql)}>Export…</button>
+        <button class="outline" onclick={() => onExport(activeSet.sql)}>Export…</button>
       </div>
     {:else}
       <div class="messages">
@@ -164,27 +196,38 @@
 
   .tabs {
     display: flex;
-    gap: 2px;
-    padding: 4px 6px 0;
+    align-items: center;
+    gap: 4px;
+    min-height: 48px;
+    padding: 0 18px;
     border-bottom: 1px solid var(--border);
-    background: var(--bg-sidebar);
     overflow-x: auto;
     flex: none;
   }
 
   .tabs button {
+    min-height: 28px;
+    padding: 0 11px;
+    border: 1px solid transparent;
+    border-radius: 6px;
     background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
-    padding: 4px 10px;
+    box-shadow: none;
     white-space: nowrap;
+    font-size: 11px;
+    font-weight: 600;
     color: var(--fg-muted);
   }
 
-  .tabs button.on {
+  .tabs button:hover:not(:disabled) {
+    background: var(--bg-hover);
     color: var(--fg);
-    border-bottom-color: var(--accent);
+  }
+
+  .tabs button.on,
+  .tabs button.on:hover:not(:disabled) {
+    color: var(--fg);
+    background: var(--bg-chip);
+    border-color: var(--border-input);
   }
 
   .badge {
@@ -212,14 +255,18 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 3px 10px;
+    height: 38px;
+    padding: 0 21px;
     border-top: 1px solid var(--border);
-    font-size: 12px;
+    font-size: 10px;
+    color: var(--fg-muted);
     flex: none;
   }
 
   .foot button {
-    padding: 0 8px;
+    min-height: 24px;
+    padding: 0 9px;
+    font-size: 11px;
   }
 
   .warn {
@@ -232,7 +279,7 @@
 
   .messages {
     overflow: auto;
-    padding: 6px 10px;
+    padding: 10px 22px;
     user-select: text;
     -webkit-user-select: text;
   }
