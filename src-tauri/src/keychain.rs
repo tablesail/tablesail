@@ -63,6 +63,41 @@ fn remove(id: &str, kind: Kind) -> Result<()> {
     }
 }
 
+/// Keychain account of the assistant's Anthropic API key (not tied to a connection).
+const ASSISTANT_ACCOUNT: &str = "assistant:anthropic-api-key";
+
+/// The stored Anthropic API key, if any.
+pub async fn assistant_key() -> Result<Option<String>> {
+    tokio::task::spawn_blocking(|| {
+        let entry = keyring::Entry::new(SERVICE, ASSISTANT_ACCOUNT).map_err(keychain_err)?;
+        match entry.get_password() {
+            Ok(key) => Ok(Some(key)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(keychain_err(e)),
+        }
+    })
+    .await
+    .map_err(|e| Error::Other(e.to_string()))?
+}
+
+/// Stores the Anthropic API key; an empty key deletes it.
+pub async fn assistant_key_store(key: &str) -> Result<()> {
+    let key = key.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let entry = keyring::Entry::new(SERVICE, ASSISTANT_ACCOUNT).map_err(keychain_err)?;
+        if key.is_empty() {
+            match entry.delete_credential() {
+                Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+                Err(e) => Err(keychain_err(e)),
+            }
+        } else {
+            entry.set_password(&key).map_err(keychain_err)
+        }
+    })
+    .await
+    .map_err(|e| Error::Other(e.to_string()))?
+}
+
 /// Which secrets a connection can use; reading only those keeps the OS from
 /// prompting for keychain items that are irrelevant.
 fn needed(config: &ConnectionConfig) -> Vec<Kind> {

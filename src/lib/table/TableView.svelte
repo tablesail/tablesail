@@ -1058,7 +1058,7 @@
 
     {#if tab === 'data'}
       <button class="bb" disabled={!editable} title="Add a row" onclick={addRow}><Icon name="plus" size={12} strokeWidth={1.8} /> Row</button>
-      <button class="bb io" disabled={!editable || !selection} title="Delete selected rows (Delete)" aria-label="Delete selected rows" onclick={deleteSelected}><Icon name="trash" size={13} /></button>
+      <button class="bb io" disabled={!editable || !selection} title="Delete selected rows (Delete)" aria-label="Delete selected rows" onclick={deleteSelected}><Icon name="trash" size={12} /></button>
     {/if}
 
     <div class="info" title={tab === 'data' ? lastQuery : ''}>
@@ -1099,13 +1099,17 @@
           oninput={() => quick === '' && applied.filters.length > 0 && applyQuick()}
         />
       </label>
-      <button class="bb io" class:on={showFilters || (appliedCount > 0 && !quick)} title="Filters (⌘F)" aria-label="Filters" onclick={toggleFilters}>
-        <Icon name="filter" size={13} />{#if appliedCount > 0 && !quick}<span class="count">{appliedCount}</span>{/if}
+      <button class="bb" class:on={showFilters || (appliedCount > 0 && !quick)} title="Filters (⌘F)" onclick={toggleFilters}>
+        <Icon name="filter" size={12} /> Filters{#if appliedCount > 0 && !quick}<span class="count">{appliedCount}</span>{/if}
       </button>
-      <button class="bb io" title="Refresh (⌘R)" aria-label="Refresh" onclick={refresh}><Icon name="refresh" size={13} /></button>
     {/if}
-    <button class="bb io" disabled={!onExport} title="Export…" aria-label="Export" onclick={() => onExport?.(request)}><Icon name="export" size={13} /></button>
-    <button class="bb io" disabled={importDisabled} title="Import CSV…" aria-label="Import CSV" onclick={() => onImport?.(table)}><Icon name="import" size={13} /></button>
+    <div class="grp">
+      {#if tab === 'data'}
+        <button class="gi" title="Refresh (⌘R)" aria-label="Refresh" onclick={refresh}><Icon name="refresh" size={13} /></button>
+      {/if}
+      <button class="gi" disabled={!onExport} title="Export…" aria-label="Export" onclick={() => onExport?.(request)}><Icon name="export" size={13} /></button>
+      <button class="gi" disabled={importDisabled} title="Import CSV…" aria-label="Import CSV" onclick={() => onImport?.(table)}><Icon name="import" size={13} /></button>
+    </div>
   </div>
 </div>
 
@@ -1295,64 +1299,87 @@
   .bottombar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    height: 36px;
+    gap: 6px;
+    height: 38px;
     padding: 0 8px;
-    border-top: 1px solid var(--border);
+    border-top: 0.5px solid var(--border-strong);
     background: var(--bg-chrome);
-    font-size: 11px;
+    font-size: 12px;
     flex: 0 0 auto;
     white-space: nowrap;
   }
 
   .bottombar .seg {
-    margin-right: 6px;
-    padding: 2px;
-    gap: 2px;
+    margin-right: 2px;
+    border: 0.5px solid var(--border-input);
+    background: var(--bg-chip);
+    box-shadow: var(--btn-shadow);
   }
 
   .bottombar .seg button {
     min-height: 22px;
-    padding: 0 11px;
-    font-size: 11px;
+    padding: 0 12px;
+    font-size: 12px;
   }
 
   .bottombar .seg button.on,
   .bottombar .seg button.on:hover:not(:disabled) {
     background: var(--accent);
     color: var(--accent-fg);
-    font-weight: 650;
+    font-weight: 600;
+    box-shadow: none;
   }
 
+  /* Bordered push button (TablePlus "+ Row", "Filters"). */
   .bb {
     position: relative;
-    gap: 4px;
-    min-height: 26px;
-    height: 26px;
-    padding: 0 8px;
-    border: none;
-    background: transparent;
-    box-shadow: none;
-    border-radius: 6px;
-    font-size: 11px;
-    color: var(--fg-muted);
+    gap: 5px;
+    min-height: 24px;
+    height: 24px;
+    padding: 0 10px;
+    font-size: 12px;
+    color: var(--fg);
   }
 
   .bb.io {
     width: 28px;
     padding: 0;
+    color: var(--fg-muted);
   }
 
-  .bb:hover:not(:disabled),
-  .bb.on {
+  .bb.on,
+  .bb.on:hover:not(:disabled) {
     background: var(--bg-active);
+  }
+
+  .grp {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    border: 0.5px solid var(--border-input);
+    border-radius: 6px;
+    background: var(--bg-chip);
+    box-shadow: var(--btn-shadow);
+  }
+
+  .gi {
+    width: 28px;
+    min-height: 22px;
+    height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    box-shadow: none;
+    color: var(--fg-muted);
+  }
+
+  .gi:hover:not(:disabled) {
+    background: var(--bg-hover);
     color: var(--fg);
   }
 
   .count {
-    position: absolute;
-    top: 0;
-    right: -1px;
     min-width: 14px;
     height: 14px;
     padding: 0 3px;
@@ -1418,11 +1445,10 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    width: 170px;
-    height: 26px;
-    margin: 0 2px;
+    width: 180px;
+    height: 24px;
     padding: 0 8px;
-    border: 1px solid var(--border-strong);
+    border: 0.5px solid var(--border-input);
     border-radius: 6px;
     background: var(--bg-input);
     color: var(--fg-faint);
@@ -1430,6 +1456,7 @@
 
   .quick:focus-within {
     border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
   .quick input {
@@ -1441,7 +1468,7 @@
     border: none;
     background: none;
     box-shadow: none;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .quick input:focus {

@@ -11,6 +11,7 @@ pub mod drivers;
 pub mod error;
 pub mod export;
 pub mod model;
+pub mod querylog;
 pub mod session;
 pub mod split;
 pub mod ssh;

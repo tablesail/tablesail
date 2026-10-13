@@ -608,3 +608,16 @@ pub async fn job_cancel(state: State<'_, AppState>, job_id: String) -> Result<()
     state.job(&job_id)?.cancel.cancel();
     Ok(())
 }
+
+// --- query log -------------------------------------------------------------
+
+/// Statements sent to servers since `seq` (0 = everything still kept).
+#[tauri::command]
+pub fn query_log_since(seq: u64) -> Vec<dbcore::querylog::LogEntry> {
+    dbcore::querylog::since(seq)
+}
+
+#[tauri::command]
+pub fn query_log_clear() {
+    dbcore::querylog::clear();
+}

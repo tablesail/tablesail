@@ -6,6 +6,7 @@
   import Sidebar from '../sidebar/Sidebar.svelte'
   import QueryTab from '../editor/QueryTab.svelte'
   import TableView from '../table/TableView.svelte'
+  import ConsoleLog from './ConsoleLog.svelte'
   import Inspector from './Inspector.svelte'
   import TabBar from './TabBar.svelte'
   import TopBar from './TopBar.svelte'
@@ -34,6 +35,40 @@
   }
 
   let sidebarWidth = $state(readWidth())
+
+  const LOG_KEY = 'tablesoft.consoleHeight'
+  let logHeight = $state(readLogHeight())
+
+  function readLogHeight(): number {
+    try {
+      const n = Number(localStorage.getItem(LOG_KEY))
+      if (n >= 80 && n <= 900) return n
+    } catch {
+      // ignore
+    }
+    return 220
+  }
+
+  function onLogResizeDown(e: PointerEvent) {
+    const el = e.currentTarget as HTMLElement
+    el.setPointerCapture(e.pointerId)
+    const startY = e.clientY
+    const startH = logHeight
+    const move = (ev: PointerEvent) => {
+      logHeight = Math.min(900, Math.max(80, startH + (startY - ev.clientY)))
+    }
+    const up = () => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      try {
+        localStorage.setItem(LOG_KEY, String(Math.round(logHeight)))
+      } catch {
+        // ignore
+      }
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+  }
 
   let session = $derived(sessions.active)
   let activeTab = $derived(tabs.active(session?.sessionId ?? null))
@@ -64,13 +99,13 @@
     <TopBar {session} />
     <div
       class="body"
-      style:grid-template-columns="{sidebarWidth}px 1px minmax(0, 1fr) {inspector.open ? '280px' : '0px'}"
+      style:grid-template-columns="{ui.sidebarHidden ? '0px 0px' : `${sidebarWidth}px 1px`} minmax(0, 1fr) {inspector.open ? '300px' : '0px'}"
     >
       {#key session.sessionId}
-        <Sidebar {session} />
+        <div class="side"><Sidebar {session} /></div>
       {/key}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="resize" onpointerdown={onResizeDown}></div>
+      <div class="resize" class:off={ui.sidebarHidden} onpointerdown={onResizeDown}></div>
       <section class="main">
         <TabBar {session} />
         <div class="tabs">
@@ -118,6 +153,13 @@
             </div>
           {/if}
         </div>
+        {#if ui.console}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="log-resize" onpointerdown={onLogResizeDown}></div>
+          <div class="log" style:height="{logHeight}px">
+            <ConsoleLog onClose={() => (ui.console = false)} />
+          </div>
+        {/if}
       </section>
       {#if inspector.open}
         <Inspector {session} activeTabId={activeTab?.id ?? null} />
@@ -158,6 +200,16 @@
     }
   }
 
+  .side {
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .resize.off {
+    pointer-events: none;
+  }
+
   .resize {
     position: relative;
     cursor: col-resize;
@@ -184,6 +236,34 @@
     min-width: 0;
     min-height: 0;
     background: var(--bg);
+  }
+
+  .log-resize {
+    position: relative;
+    height: 1px;
+    flex: none;
+    background: var(--border-strong);
+    cursor: row-resize;
+    touch-action: none;
+    z-index: 2;
+  }
+
+  .log-resize::after {
+    content: '';
+    position: absolute;
+    inset: -3px 0;
+  }
+
+  .log {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .log > :global(*) {
+    flex: 1;
+    min-height: 0;
   }
 
   .tabs {

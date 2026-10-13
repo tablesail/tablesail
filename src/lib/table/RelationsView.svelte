@@ -110,8 +110,8 @@
     gap: 7px;
     padding: 13px 15px;
     font-weight: 750;
-    color: var(--accent-solid-fg);
-    background: var(--accent-solid);
+    color: var(--fg);
+    background: var(--row-selected);
   }
 
   .target:hover:not(:disabled) {

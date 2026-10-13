@@ -225,16 +225,20 @@
 
   let measureCtx: CanvasRenderingContext2D | null = null
   let fontFamily = 'system-ui, sans-serif'
+  let monoFamily = 'ui-monospace, monospace'
   try {
-    fontFamily = getComputedStyle(document.documentElement).fontFamily || fontFamily
+    const css = getComputedStyle(document.documentElement)
+    fontFamily = css.fontFamily || fontFamily
+    monoFamily = css.getPropertyValue('--mono').trim() || monoFamily
   } catch {
-    // keep the default
+    // keep the defaults
   }
 
-  function textWidth(text: string, bold = false): number {
+  // Headers are set in the UI font (medium), cells in the monospace font.
+  function textWidth(text: string, header = false): number {
     measureCtx ??= document.createElement('canvas').getContext('2d')
-    if (!measureCtx) return text.length * 7
-    measureCtx.font = `${bold ? '600 ' : ''}12px ${fontFamily}`
+    if (!measureCtx) return text.length * 8
+    measureCtx.font = header ? `500 13px ${fontFamily}` : `13px ${monoFamily}`
     return measureCtx.measureText(text).width
   }
 
@@ -245,9 +249,9 @@
     decimal: 100,
     date: 100,
     time: 90,
-    dateTime: 160,
-    uuid: 300,
-    objectId: 210,
+    dateTime: 180,
+    uuid: 320,
+    objectId: 230,
     text: 160,
     json: 160,
     binary: 130,
@@ -272,7 +276,7 @@
       if (!row) continue
       max = Math.max(max, textWidth(formatValue(row[c], family).text))
     }
-    return max < 0 ? null : max + 18
+    return max < 0 ? null : max + 22
   }
 
   function initWidths() {
@@ -834,7 +838,7 @@
         ondblclick={onBodyDblClick}
         oncontextmenu={onBodyContext}
       >
-        <div class="rows" style:width="{totalW}px" style:transform="translate({-scrollLeft}px, {-rowsShift}px)">
+        <div class="rows" style:width="{Math.max(totalW, bodyW)}px" style:transform="translate({-scrollLeft}px, {-rowsShift}px)">
           {#each rowIdx as r (r)}
             {@const row = rowAt(r, revision)}
             <div class="row {rowClass?.(r) ?? ''}" class:alt={r % 2 === 1} class:cur={selection?.activeRow === r}>
@@ -928,7 +932,7 @@
     outline: none;
     background: var(--bg);
     color: var(--fg-cell);
-    font-size: 12px;
+    font-size: 13px;
     contain: layout paint;
   }
 
@@ -1011,17 +1015,13 @@
   }
 
   .hname {
-    font-weight: 600;
-    font-size: 12px;
+    font-weight: 500;
+    font-size: 13px;
     color: var(--fg);
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 0 1 auto;
     min-width: 0;
-  }
-
-  .h:hover .hname {
-    color: var(--accent);
   }
 
   .badge {
@@ -1068,10 +1068,10 @@
   .g {
     height: var(--row-h);
     line-height: var(--row-h);
-    padding: 0 10px;
+    padding: 0 8px;
     text-align: right;
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: 12px;
     color: var(--fg-faint);
     font-variant-numeric: tabular-nums;
     overflow: hidden;
@@ -1081,7 +1081,6 @@
   .g.on {
     color: var(--fg);
     background: var(--row-selected);
-    box-shadow: inset 3px 0 0 var(--accent);
   }
 
   .body {
@@ -1113,9 +1112,16 @@
     background: var(--bg-hover);
   }
 
+  /* Current row: solid accent across the whole row, like TablePlus. */
   .row.cur,
   .row.cur:hover {
-    background: var(--row-selected);
+    background: var(--accent-solid);
+    color: var(--accent-solid-fg);
+  }
+
+  .row.cur .cell.null,
+  .row.cur .cell.missing {
+    color: color-mix(in srgb, var(--accent-solid-fg) 55%, transparent);
   }
 
   .row.inserted {
@@ -1198,7 +1204,7 @@
   }
 
   .cell.null {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .cell.mono {
@@ -1231,8 +1237,8 @@
   .active {
     position: absolute;
     pointer-events: none;
-    border: 1.5px solid var(--accent);
-    border-radius: 2px;
+    border: 1.5px solid color-mix(in srgb, var(--fg) 70%, transparent);
+    border-radius: 1px;
     z-index: 3;
   }
 

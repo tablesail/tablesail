@@ -18,13 +18,25 @@ export interface InspectedRow {
 
 class InspectorStore {
   open = $state(false)
+  /** Which page of the right panel is showing. */
+  tab = $state<'details' | 'assistant'>('details')
   current = $state<InspectedRow | null>(null)
+  /** Last row each tab published, so only picking a different row reopens the panel. */
+  private lastRow = new Map<string, number>()
 
   show(row: InspectedRow) {
     this.current = row
+    if (this.lastRow.get(row.tabId) === row.rowIndex) return
+    this.lastRow.set(row.tabId, row.rowIndex)
+    // Like TablePlus: selecting a row brings up its details.
+    if (!this.open) {
+      this.tab = 'details'
+      this.open = true
+    }
   }
 
   clear(tabId: string) {
+    this.lastRow.delete(tabId)
     if (this.current?.tabId === tabId) this.current = null
   }
 

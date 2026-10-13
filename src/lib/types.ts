@@ -404,3 +404,38 @@ export interface JobProgress {
   /** Non-fatal note about the finished job (e.g. long values truncated in a query export). */
   warning?: string | null
 }
+
+// ---------------------------------------------------------------------------
+// Query log (console pane) and AI assistant
+// ---------------------------------------------------------------------------
+
+/** One statement the app sent to a server (crates/dbcore/src/querylog.rs). */
+export interface LogEntry {
+  /** Strictly increasing; poll with the last one you saw. */
+  seq: number
+  /** Unix time in milliseconds. */
+  atMs: number
+  sql: string
+}
+
+export interface AssistantMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface AssistantRequest {
+  /** Lets `assistantCancel` stop this request. */
+  requestId?: string | null
+  engine: Engine
+  serverVersion: string
+  database: string
+  /** One `schema.table(col, col)` per line. */
+  schemaContext: string
+  messages: AssistantMessage[]
+  /** Defaults to claude-sonnet-5-5 on the Rust side. */
+  model?: string | null
+}
+
+export interface AssistantReply {
+  text: string
+}

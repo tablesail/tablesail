@@ -34,6 +34,7 @@ use crate::model::{
     IndexInfo, Page, RowCount, SslMode, StatementKind, TableInfo, TableKind, TableRef,
     TableStructure, TypeFamily,
 };
+use crate::querylog::logged;
 use crate::split::statement_kind;
 use crate::value::{Row as DbRow, Value};
 
@@ -444,9 +445,7 @@ type TextRows = Vec<Vec<Option<String>>>;
 
 /// Runs a catalog query over the text protocol; every cell comes back as text.
 async fn text_rows(pool: &PgPool, sql: &str) -> Result<TextRows> {
-    let rows = sqlx::raw_sql(AssertSqlSafe(sql.to_owned()))
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::raw_sql(logged(sql)).fetch_all(pool).await?;
     rows_as_text(&rows)
 }
 
@@ -969,12 +968,9 @@ impl CancelHandle for PgCancel {
         if !self.state.request() {
             return Ok(());
         }
-        sqlx::raw_sql(AssertSqlSafe(format!(
-            "SELECT pg_cancel_backend({})",
-            self.pid
-        )))
-        .execute(&self.pool)
-        .await?;
+        sqlx::raw_sql(logged(format!("SELECT pg_cancel_backend({})", self.pid)))
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }
@@ -1068,7 +1064,7 @@ impl Driver for PgDriver {
             Arc::new(Vec::new())
         };
         let sql = select_sql(DIALECT, &request, &key, Some((limit, offset)))?;
-        let rows = sqlx::raw_sql(AssertSqlSafe(sql.clone()))
+        let rows = sqlx::raw_sql(logged(sql.clone()))
             .fetch_all(&db.pool)
             .await?;
         let cols = match rows.first() {
@@ -1218,7 +1214,7 @@ async fn stream_statement(
     let mut cols: Vec<PgCol> = Vec::new();
     let mut deferred: Option<u64> = None;
     {
-        let mut stream = sqlx::raw_sql(AssertSqlSafe(sql.to_owned())).fetch_many(&mut *conn);
+        let mut stream = sqlx::raw_sql(logged(sql)).fetch_many(&mut *conn);
         while let Some(item) = stream.next().await {
             match item? {
                 Either::Right(row) => {

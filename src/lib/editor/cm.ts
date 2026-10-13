@@ -84,12 +84,14 @@ const theme = EditorView.theme({
   '.cm-tooltip': {
     backgroundColor: 'var(--bg-elev)',
     color: 'var(--fg)',
-    border: '1px solid var(--border)',
+    border: '0.5px solid var(--border-strong)',
     borderRadius: '6px',
+    boxShadow: 'var(--shadow-sm)',
+    overflow: 'hidden',
   },
   '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-    backgroundColor: 'var(--accent)',
-    color: 'var(--accent-fg)',
+    backgroundColor: 'var(--row-selected)',
+    color: 'var(--fg)',
   },
   '.cm-panels': { backgroundColor: 'var(--bg-sidebar)', color: 'var(--fg)' },
   '.cm-searchMatch': { backgroundColor: 'var(--selection)' },

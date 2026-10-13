@@ -5673,6 +5673,8 @@ dependencies = [
  "dbcore",
  "keyring",
  "log",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",

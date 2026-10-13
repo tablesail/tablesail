@@ -4,6 +4,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   ApplyResult,
+  AssistantReply,
+  AssistantRequest,
   BrowseRequest,
   ChangeSet,
   ColumnValue,
@@ -16,6 +18,7 @@ import type {
   ExportFormat,
   ExportSource,
   JobProgress,
+  LogEntry,
   Page,
   QueryRun,
   QueryStatus,
@@ -100,4 +103,14 @@ export const api = {
     invoke<string>('import_start', { sessionId, import: importSpec }),
   jobStatus: (jobId: string) => invoke<JobProgress>('job_status', { jobId }),
   jobCancel: (jobId: string) => invoke<void>('job_cancel', { jobId }),
+
+  // console: every statement sent to a server
+  queryLogSince: (seq: number) => invoke<LogEntry[]>('query_log_since', { seq }),
+  queryLogClear: () => invoke<void>('query_log_clear'),
+
+  // AI assistant (the API key stays in the OS keychain; it is never returned)
+  assistantAsk: (req: AssistantRequest) => invoke<AssistantReply>('assistant_ask', { req }),
+  assistantCancel: (requestId: string) => invoke<void>('assistant_cancel', { requestId }),
+  assistantKeyStatus: () => invoke<boolean>('assistant_key_status'),
+  assistantKeySet: (key: string) => invoke<void>('assistant_key_set', { key }),
 }

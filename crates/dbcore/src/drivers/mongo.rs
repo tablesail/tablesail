@@ -33,6 +33,7 @@ use crate::model::{
     ApplyResult, BrowseRequest, ChangeSet, ColumnInfo, ColumnMeta, ConnectParams, Page, RowCount,
     SslConfig, SslMode, TableInfo, TableKind, TableRef, TableStructure,
 };
+use crate::querylog::record;
 use crate::value::Row;
 
 use convert::{bson_to_value, db_err, error_code, missing};
@@ -646,6 +647,10 @@ impl Driver for MongoDriver {
 
     async fn count_rows(&self, request: &BrowseRequest) -> Result<RowCount> {
         let coll = self.collection(&request.table);
+        record(&format!(
+            "{}.estimatedDocumentCount()",
+            render::collection_ref(&request.table.name)
+        ));
         let estimate = coll
             .estimated_document_count()
             .max_time(COUNT_TIMEOUT)
@@ -669,6 +674,11 @@ impl Driver for MongoDriver {
             self.structure(&request.table).await?.columns.clone()
         };
         let query_filter = filter::build_filter(request, &columns)?;
+        record(&format!(
+            "{}.countDocuments({})",
+            render::collection_ref(&request.table.name),
+            render::render_doc(&query_filter)
+        ));
         match coll
             .count_documents(query_filter)
             .max_time(COUNT_TIMEOUT)
@@ -693,6 +703,14 @@ impl Driver for MongoDriver {
         let projection = filter::build_projection(request);
         let columns = requested_columns(request, &structure);
         let coll = self.collection(&request.table);
+        record(&render::render_find(
+            &request.table.name,
+            &query_filter,
+            projection.as_ref(),
+            Some(&sort),
+            0,
+            None,
+        ));
 
         let token = CancellationToken::new();
         let comment = format!("tablesoft:{}", uuid::Uuid::new_v4());
@@ -719,6 +737,7 @@ impl Driver for MongoDriver {
 
     async fn query(&self, database: Option<&str>, sql: &str) -> Result<Box<dyn Cursor>> {
         let statement = shell::parse(sql)?;
+        record(sql.trim());
         let db = statement
             .database
             .clone()
@@ -782,6 +801,14 @@ impl MongoDriver {
         offset: u64,
         limit: u32,
     ) -> Result<Vec<Document>> {
+        record(&render::render_find(
+            &table.name,
+            query_filter,
+            projection,
+            Some(sort),
+            offset,
+            Some(i64::from(limit)),
+        ));
         let coll = self.collection(table);
         let mut find = coll
             .find(query_filter.clone())

@@ -15,6 +15,7 @@ use crate::model::{
     ApplyResult, ChangeSet, ColumnInput, ColumnValue, Editability, RowChange, TableRef,
     TableStructure,
 };
+use crate::querylog::record;
 use crate::value::Value;
 
 /// Documents per `insert_many` during CSV import.
@@ -219,6 +220,9 @@ impl MongoDriver {
                 rows_affected: 0,
             });
         }
+        for write in &planned {
+            record(&write.render(&changes.table.name));
+        }
         let coll = self.collection(&changes.table);
         let outcome = match self
             .run_batch(&coll, &planned, self.supports_transactions)
@@ -322,6 +326,11 @@ impl MongoDriver {
                 }
                 documents.push(document);
             }
+            record(&format!(
+                "{}.insertMany([ {} documents ])",
+                collection_ref(&table.name),
+                documents.len()
+            ));
             match coll.insert_many(documents).await {
                 Ok(result) => inserted += result.inserted_ids.len() as u64,
                 Err(e) => {

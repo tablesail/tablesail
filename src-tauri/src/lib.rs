@@ -1,3 +1,4 @@
+mod assistant;
 mod commands;
 mod jobs;
 mod keychain;
@@ -58,6 +59,12 @@ pub fn run() {
             commands::import_start,
             commands::job_status,
             commands::job_cancel,
+            commands::query_log_since,
+            commands::query_log_clear,
+            assistant::assistant_ask,
+            assistant::assistant_cancel,
+            assistant::assistant_key_status,
+            assistant::assistant_key_set,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tablesoft");

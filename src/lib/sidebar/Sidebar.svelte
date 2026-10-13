@@ -1,11 +1,12 @@
 <!--
-  Left sidebar, TablePlus-style: search, the selected schema's tables grouped by
-  kind, and database/schema pickers at the bottom. The clock and star buttons
-  swap the list for query history or saved queries.
+  Left sidebar, TablePlus-style: Items / Queries / History, a search field, the
+  selected schema's objects as an expandable tree (tables open to show their
+  columns), and database/schema pickers at the bottom.
 -->
 <script lang="ts">
   import ContextMenu, { type MenuItem } from '../shell/ContextMenu.svelte'
   import Icon, { type IconName } from '../ui/Icon.svelte'
+  import { api } from '../api'
   import { history } from '../stores/history.svelte'
   import { saved } from '../stores/saved.svelte'
   import { sessions } from '../stores/sessions.svelte'
@@ -23,6 +24,8 @@
 
   let filter = $state('')
   let collapsed = $state<Record<string, boolean>>({})
+  let expanded = $state<Record<string, boolean>>({})
+  let columnInfo = $state<Record<string, { name: string; type: string; pk: boolean }[]>>({})
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null)
   let chosenSchema = $state<string | null>(null)
 
@@ -46,8 +49,14 @@
     { title: 'Tables', kinds: ['table', 'virtual', 'foreignTable', 'system'] },
     { title: 'Collections', kinds: ['collection', 'timeSeries'] },
     { title: 'Views', kinds: ['view'] },
-    { title: 'Materialized views', kinds: ['materializedView'] },
+    { title: 'Materialized Views', kinds: ['materializedView'] },
     { title: 'Sequences', kinds: ['sequence'] },
+  ]
+
+  const VIEWS: { id: RailView; label: string }[] = [
+    { id: 'browser', label: 'Items' },
+    { id: 'saved', label: 'Queries' },
+    { id: 'history', label: 'History' },
   ]
 
   let schemaNames = $derived.by(() => {
@@ -79,9 +88,29 @@
     return { database: t.database, schema: t.schema ?? null, name: t.name }
   }
 
+  function key(t: TableInfo): string {
+    return t.schema ? `${t.schema}.${t.name}` : t.name
+  }
+
+  function hasColumns(t: TableInfo): boolean {
+    return t.kind !== 'sequence'
+  }
+
   function isActive(t: TableInfo): boolean {
     const a = activeTab
     return a?.kind === 'table' && a.table.name === t.name && (a.table.schema ?? null) === (t.schema ?? null) && a.table.database === t.database
+  }
+
+  async function toggleExpand(t: TableInfo) {
+    const k = key(t)
+    expanded[k] = !expanded[k]
+    if (!expanded[k] || columnInfo[k]) return
+    try {
+      const s = await api.tableStructure(session.sessionId, ref(t))
+      columnInfo[k] = s.columns.map((c) => ({ name: c.name, type: c.dataType, pk: c.isPrimaryKey }))
+    } catch {
+      columnInfo[k] = (entry.snapshot?.columns[k] ?? []).map((name) => ({ name, type: '', pk: false }))
+    }
   }
 
   function tableMenu(t: TableInfo): MenuItem[] {
@@ -100,7 +129,7 @@
   }
 
   function setView(v: RailView) {
-    ui.rail = ui.rail === v ? 'browser' : v
+    ui.rail = v
     filter = ''
   }
 
@@ -126,21 +155,25 @@
     return saved.list.filter((s) => !q || s.name.toLowerCase().includes(q) || s.sql.toLowerCase().includes(q))
   })
 
-  let placeholder = $derived(ui.rail === 'history' ? 'Search history…' : ui.rail === 'saved' ? 'Search saved queries…' : 'Search for item…')
+  let placeholder = $derived(ui.rail === 'history' ? 'Search history…' : ui.rail === 'saved' ? 'Search queries…' : 'Search for item…')
 </script>
 
+{#snippet chevron(open: boolean)}
+  <span class="chev" class:open><Icon name="chevron-right" size={10} strokeWidth={1.8} /></span>
+{/snippet}
+
 <aside class="sidebar">
+  <div class="views" role="tablist">
+    {#each VIEWS as v (v.id)}
+      <button role="tab" aria-selected={ui.rail === v.id} class:on={ui.rail === v.id} onclick={() => setView(v.id)}>{v.label}</button>
+    {/each}
+  </div>
+
   <div class="top">
     <label class="search">
-      <Icon name="search" size={12} />
+      <Icon name="search" size={13} />
       <input type="search" {placeholder} bind:value={filter} spellcheck="false" />
     </label>
-    <button class="mini" class:on={ui.rail === 'history'} title="Query history" aria-label="Query history" onclick={() => setView('history')}>
-      <Icon name="clock" size={14} />
-    </button>
-    <button class="mini" class:on={ui.rail === 'saved'} title="Saved queries" aria-label="Saved queries" onclick={() => setView('saved')}>
-      <Icon name="star" size={14} />
-    </button>
   </div>
 
   <div class="list">
@@ -155,25 +188,62 @@
 
       {#each sections as sec (sec.title)}
         <button class="section" onclick={() => (collapsed[sec.title] = !collapsed[sec.title])} aria-expanded={!collapsed[sec.title]}>
-          <span class="chev" class:open={!collapsed[sec.title]}><Icon name="chevron-right" size={10} strokeWidth={2} /></span>
+          {@render chevron(!collapsed[sec.title])}
           {sec.title}
-          <span class="count">{sec.tables.length}</span>
         </button>
         {#if !collapsed[sec.title]}
-          {#each sec.tables as t (t.schema + '\u0000' + t.name)}
-            <button
+          {#each sec.tables as t (key(t))}
+            {@const k = key(t)}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <div
               class="row"
               class:active={isActive(t)}
-              title={`${t.name}${t.estimatedRows != null ? ` · ≈ ${formatCount(t.estimatedRows)} rows` : ''}${t.comment ? `\n${t.comment}` : ''}`}
+              role="treeitem"
+              aria-selected={isActive(t)}
+              aria-expanded={hasColumns(t) ? !!expanded[k] : undefined}
+              tabindex="-1"
+              title={`${t.name}${t.estimatedRows != null ? `\n≈ ${formatCount(t.estimatedRows)} rows` : ''}${t.comment ? `\n${t.comment}` : ''}`}
               onclick={() => tabs.openTable(session.sessionId, ref(t))}
               oncontextmenu={(e) => {
                 e.preventDefault()
                 menu = { x: e.clientX, y: e.clientY, items: tableMenu(t) }
               }}
             >
-              <Icon name={KIND[t.kind] ?? 'table'} size={14} />
+              {#if hasColumns(t)}
+                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+                <span
+                  class="twist"
+                  onclick={(e) => {
+                    e.stopPropagation()
+                    void toggleExpand(t)
+                  }}>{@render chevron(!!expanded[k])}</span
+                >
+              {:else}
+                <span class="twist"></span>
+              {/if}
+              {#if KIND[t.kind] === 'table'}
+                <svg class="ticon" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true">
+                  <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" fill="var(--table-icon-fill)" stroke="var(--table-icon)" stroke-width="1" />
+                  <path d="M2 3h12v3H2z" fill="var(--table-icon)" />
+                  <path d="M1.5 9.5h13M6 6v7.5M10.5 6v7.5" stroke="var(--table-icon)" stroke-width="1" fill="none" />
+                </svg>
+              {:else}
+                <span class="kicon"><Icon name={KIND[t.kind] ?? 'table'} size={14} /></span>
+              {/if}
               <span class="name">{#if showSchemaInName && t.schema}<span class="dim">{t.schema}.</span>{/if}{t.name}</span>
-            </button>
+            </div>
+            {#if expanded[k]}
+              {@const cols = columnInfo[k] ?? (entry.snapshot?.columns[k] ?? []).map((name) => ({ name, type: '', pk: false }))}
+              {#each cols as c (c.name)}
+                <div class="col" title={c.type ? `${c.name} ${c.type}` : c.name}>
+                  <span class="cicon" class:pk={c.pk}>{#if c.pk}<Icon name="key" size={11} />{:else}<Icon name="columns" size={11} />{/if}</span>
+                  <span class="name">{c.name}</span>
+                  {#if c.type}<span class="ctype">{c.type}</span>{/if}
+                </div>
+              {:else}
+                <div class="col dim">Loading…</div>
+              {/each}
+            {/if}
           {/each}
         {/if}
       {/each}
@@ -181,10 +251,12 @@
         <div class="note error-text" title={entry.error}>Refresh failed: {entry.error}</div>
       {/if}
     {:else if ui.rail === 'history'}
-      <div class="section static">
-        Query history <span class="count">{history.entries.length}</span>
-        {#if history.entries.length > 0}<button class="clear" onclick={() => history.clear()}>Clear</button>{/if}
-      </div>
+      {#if history.entries.length > 0}
+        <div class="list-head">
+          <span>{history.entries.length} queries</span>
+          <button class="clear" onclick={() => history.clear()}>Clear</button>
+        </div>
+      {/if}
       {#if historyList.length === 0}
         <div class="note">{filter ? 'No matching queries.' : 'Queries you run appear here.'}</div>
       {/if}
@@ -195,7 +267,6 @@
         </button>
       {/each}
     {:else}
-      <div class="section static">Saved queries <span class="count">{saved.list.length}</span></div>
       {#if savedList.length === 0}
         <div class="note">{filter ? 'No matching queries.' : 'Save a query from the SQL editor to keep it here.'}</div>
       {/if}
@@ -226,20 +297,24 @@
   </div>
 
   <div class="bottom">
-    <select value={database} onchange={(e) => sessions.setDatabase(session.sessionId, e.currentTarget.value)} title="Database" aria-label="Database">
-      {#each session.databases as db (db)}
-        <option value={db}>{db}</option>
-      {/each}
-      {#if session.databases.length === 0}
-        <option value={database}>{database || '(default)'}</option>
-      {/if}
-    </select>
+    <button class="plus" title="New query" aria-label="New query" onclick={() => tabs.newQuery(session.sessionId, database)}>
+      <Icon name="plus" size={13} />
+    </button>
+    {#if session.databases.length > 1}
+      <select value={database} onchange={(e) => sessions.setDatabase(session.sessionId, e.currentTarget.value)} title="Database" aria-label="Database">
+        {#each session.databases as db (db)}
+          <option value={db}>{db}</option>
+        {/each}
+      </select>
+    {/if}
     {#if schemaNames.length > 1 || (schemaNames.length === 1 && schemaNames[0] !== '')}
       <select value={schema} onchange={(e) => (chosenSchema = e.currentTarget.value)} title="Schema" aria-label="Schema">
         {#each schemaNames as name (name)}
           <option value={name}>{name || '(default)'}</option>
         {/each}
       </select>
+    {:else if session.databases.length <= 1}
+      <span class="dbname">{database || '(default)'}</span>
     {/if}
   </div>
 </aside>
@@ -257,30 +332,53 @@
     background: var(--bg-sidebar);
   }
 
-  .top {
+  .views {
     display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 10px 8px 8px 10px;
+    justify-content: center;
+    gap: 4px;
+    padding: 8px 8px 4px;
+  }
+
+  .views button {
+    min-height: 24px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+  }
+
+  .views button:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--fg);
+  }
+
+  .views button.on,
+  .views button.on:hover:not(:disabled) {
+    background: var(--bg-active);
+    color: var(--fg);
+  }
+
+  .top {
+    padding: 4px 8px 6px;
   }
 
   .search {
-    flex: 1;
-    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 28px;
-    margin-right: 4px;
+    height: 26px;
     padding: 0 8px;
-    border: 1px solid var(--border-strong);
-    border-radius: 7px;
+    border: 0.5px solid var(--border-input);
+    border-radius: 6px;
     background: var(--bg-input);
     color: var(--fg-faint);
   }
 
   .search:focus-within {
     border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
   }
 
   .search input {
@@ -292,46 +390,22 @@
     border: none;
     background: none;
     box-shadow: none;
-    font-size: 11px;
+    font-size: 13px;
   }
 
   .search input:focus {
     box-shadow: none;
   }
 
-  .mini {
-    width: 26px;
-    min-width: 26px;
-    height: 26px;
-    min-height: 26px;
-    padding: 0;
-    border: none;
-    border-radius: 6px;
-    background: none;
-    box-shadow: none;
-    color: var(--fg-faint);
-  }
-
-  .mini:hover:not(:disabled) {
-    background: var(--bg-active);
-    color: var(--fg);
-  }
-
-  .mini.on,
-  .mini.on:hover:not(:disabled) {
-    background: var(--accent-solid);
-    color: var(--accent-solid-fg);
-  }
-
   .list {
     flex: 1;
     overflow-y: auto;
-    padding: 0 8px 10px;
+    padding: 2px 6px 10px;
   }
 
   .note {
-    padding: 8px;
-    font-size: 11px;
+    padding: 6px 8px;
+    font-size: 12px;
     color: var(--fg-muted);
     word-break: break-word;
   }
@@ -340,34 +414,28 @@
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 5px;
+    gap: 4px;
     width: 100%;
-    height: 24px;
-    min-height: 24px;
-    margin-top: 4px;
-    padding: 0 4px;
+    height: 22px;
+    min-height: 22px;
+    padding: 0 2px;
     border: none;
     background: none;
     box-shadow: none;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--fg-muted);
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--fg);
   }
 
   .section:hover:not(:disabled) {
     background: none;
-    color: var(--fg-muted);
-  }
-
-  .section .count {
-    margin-left: auto;
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--fg-faint);
   }
 
   .chev {
     display: inline-flex;
+    width: 12px;
+    justify-content: center;
+    color: var(--fg-muted);
     transition: transform 0.12s;
   }
 
@@ -375,63 +443,56 @@
     transform: rotate(90deg);
   }
 
-  .clear {
-    margin-left: auto;
-    min-height: 0;
-    padding: 0 4px;
-    border: none;
-    background: none;
-    box-shadow: none;
-    font-size: 10px;
-    letter-spacing: 0;
-    text-transform: none;
-    color: var(--fg-faint);
-  }
-
-  .clear:hover:not(:disabled) {
-    background: none;
-    color: var(--fg);
-  }
-
   .row {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
-    gap: 7px;
-    width: 100%;
+    gap: 4px;
     height: 22px;
-    min-height: 22px;
-    padding: 0 8px 0 19px;
-    border: none;
+    padding: 0 6px 0 14px;
     border-radius: 5px;
-    background: none;
-    box-shadow: none;
-    text-align: left;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 13px;
     color: var(--fg-cell);
+    outline: none;
   }
 
-  .row :global(svg) {
-    color: var(--info);
-  }
-
-  .row:hover:not(:disabled) {
-    background: var(--bg-active);
+  .row:hover {
+    background: var(--bg-hover);
   }
 
   .row.active,
-  .row.active:hover:not(:disabled) {
+  .row.active:hover {
     background: var(--accent-solid);
     color: var(--accent-solid-fg);
   }
 
-  .row.active :global(svg) {
-    color: var(--accent);
+  .row.active .chev {
+    color: inherit;
   }
 
-  :global(:root[data-theme='light']) .row.active :global(svg) {
-    color: color-mix(in srgb, var(--accent) 60%, #2d3a12);
+  .twist {
+    display: inline-flex;
+    flex: none;
+    width: 14px;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ticon {
+    flex: none;
+    margin-right: 3px;
+  }
+
+  .kicon {
+    display: inline-flex;
+    flex: none;
+    margin-right: 3px;
+    color: var(--table-icon);
+  }
+
+  .row.active .kicon {
+    color: inherit;
   }
 
   .name {
@@ -446,28 +507,83 @@
     color: var(--fg-faint);
   }
 
+  .col {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 20px;
+    padding: 0 6px 0 50px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--fg-cell);
+  }
+
+  .cicon {
+    display: inline-flex;
+    flex: none;
+    color: var(--fg-faint);
+  }
+
+  .cicon.pk {
+    color: var(--warning);
+  }
+
+  .ctype {
+    flex: none;
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg-faint);
+    font-size: 11px;
+  }
+
+  .list-head {
+    display: flex;
+    align-items: center;
+    padding: 2px 8px 4px;
+    font-size: 11px;
+    color: var(--fg-muted);
+  }
+
+  .clear {
+    margin-left: auto;
+    min-height: 0;
+    padding: 0 4px;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-size: 11px;
+    color: var(--fg-muted);
+  }
+
+  .clear:hover:not(:disabled) {
+    background: none;
+    color: var(--fg);
+  }
+
   .item {
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 3px;
+    gap: 2px;
     width: 100%;
     min-height: 0;
-    padding: 7px 8px;
+    padding: 6px 8px;
     border: none;
-    border-radius: 6px;
+    border-radius: 5px;
     background: none;
     box-shadow: none;
     text-align: left;
   }
 
   .item:hover:not(:disabled) {
-    background: var(--bg-active);
+    background: var(--bg-hover);
   }
 
   .item code {
     font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: 12px;
     color: var(--fg-cell);
     white-space: nowrap;
     overflow: hidden;
@@ -479,7 +595,7 @@
   }
 
   .item small {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--fg-faint);
     white-space: nowrap;
     overflow: hidden;
@@ -499,23 +615,48 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 34px;
+    height: 38px;
     padding: 0 8px;
-    border-top: 1px solid var(--border);
+    border-top: 0.5px solid var(--border-strong);
     flex: none;
+  }
+
+  .plus {
+    width: 26px;
+    min-width: 26px;
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    color: var(--fg-muted);
+  }
+
+  .plus:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--fg);
   }
 
   .bottom select {
     flex: 1;
     min-width: 0;
     min-height: 24px;
-    padding: 1px 20px 1px 8px;
-    font-size: 11px;
-    background-color: transparent;
+    height: 24px;
+    padding: 0 22px 0 8px;
+    font-size: 12px;
+    background-color: var(--bg-active);
     border-color: transparent;
   }
 
-  .bottom select:hover {
-    background-color: var(--bg-active);
+  .dbname {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 8px;
+    line-height: 24px;
+    border-radius: 6px;
+    background: var(--bg-active);
+    font-size: 12px;
   }
 </style>

@@ -1,3 +1,7 @@
+<!--
+  Tab strip, TablePlus-style: tabs share the row equally with centred titles,
+  the active one raised as a white card. Arrows step between tabs.
+-->
 <script lang="ts">
   import { tabs } from '../stores/tabs.svelte'
   import { sessions } from '../stores/sessions.svelte'
@@ -12,6 +16,12 @@
 
   let list = $derived(tabs.forSession(session.sessionId))
   let activeId = $derived(tabs.activeBySession[session.sessionId])
+  let index = $derived(list.findIndex((t) => t.id === activeId))
+
+  function step(d: number) {
+    const t = list[index + d]
+    if (t) tabs.select(t.id)
+  }
 
   function onAux(e: MouseEvent, id: string) {
     if (e.button === 1) {
@@ -21,33 +31,43 @@
   }
 </script>
 
-<div class="bar" role="tablist">
-  {#each list as t (t.id)}
-    <div
-      class="tab"
-      class:active={t.id === activeId}
-      role="tab"
-      aria-selected={t.id === activeId}
-      tabindex="-1"
-      title={t.kind === 'table' ? [t.table.schema, t.table.name].filter(Boolean).join('.') : t.title}
-      onclick={() => tabs.select(t.id)}
-      onauxclick={(e) => onAux(e, t.id)}
-      onmousedown={(e) => e.button === 1 && e.preventDefault()}
-      onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && tabs.select(t.id)}
-    >
-      <button
-        class="close icon"
-        aria-label="Close tab"
+<div class="bar">
+  <div class="nav">
+    <button class="icon" tabindex="-1" aria-label="Previous tab" title="Previous tab" disabled={index <= 0} onclick={() => step(-1)}>
+      <Icon name="chevron-left" size={14} strokeWidth={1.6} />
+    </button>
+    <button class="icon" tabindex="-1" aria-label="Next tab" title="Next tab" disabled={index < 0 || index >= list.length - 1} onclick={() => step(1)}>
+      <Icon name="chevron-right" size={14} strokeWidth={1.6} />
+    </button>
+  </div>
+  <div class="strip" role="tablist">
+    {#each list as t (t.id)}
+      <div
+        class="tab"
+        class:active={t.id === activeId}
+        role="tab"
+        aria-selected={t.id === activeId}
         tabindex="-1"
-        onmousedown={(e) => e.preventDefault()}
-        onclick={(e) => {
-          e.stopPropagation()
-          tabs.close(t.id)
-        }}><Icon name="close" size={10} strokeWidth={1.8} /></button
+        title={t.kind === 'table' ? [t.table.schema, t.table.name].filter(Boolean).join('.') : t.title}
+        onclick={() => tabs.select(t.id)}
+        onauxclick={(e) => onAux(e, t.id)}
+        onmousedown={(e) => e.button === 1 && e.preventDefault()}
+        onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && tabs.select(t.id)}
       >
-      <span class="label"><span class="kind"><Icon name={t.kind === 'table' ? 'table' : 'code'} size={13} /></span><span class="t">{t.title}</span></span>
-    </div>
-  {/each}
+        <button
+          class="close icon"
+          aria-label="Close tab"
+          tabindex="-1"
+          onmousedown={(e) => e.preventDefault()}
+          onclick={(e) => {
+            e.stopPropagation()
+            tabs.close(t.id)
+          }}><Icon name="close" size={9} strokeWidth={1.8} /></button
+        >
+        <span class="t" class:query={t.kind !== 'table'}>{t.title}</span>
+      </div>
+    {/each}
+  </div>
   <button
     class="add icon"
     title="New query"
@@ -62,76 +82,73 @@
 <style>
   .bar {
     display: flex;
-    align-items: stretch;
+    align-items: center;
+    gap: 4px;
+    height: 34px;
+    padding: 0 6px;
     background: var(--bg-tabbar);
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    overflow-y: hidden;
+    border-bottom: 0.5px solid var(--border-strong);
     flex: none;
-    height: 32px;
   }
 
-  .bar::-webkit-scrollbar {
+  .nav {
+    display: flex;
+    flex: none;
+  }
+
+  .nav .icon {
+    width: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    height: 24px;
+  }
+
+  .strip {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 3px;
+    height: 26px;
+    overflow-x: auto;
+  }
+
+  .strip::-webkit-scrollbar {
     height: 0;
   }
 
   .tab {
     position: relative;
-    flex: 0 0 auto;
-    min-width: 0;
-    max-width: 240px;
+    flex: 1 1 0;
+    min-width: 110px;
     display: flex;
     align-items: center;
-    padding: 0 26px;
-    border-right: 1px solid var(--border);
+    justify-content: center;
+    padding: 0 24px;
+    border-radius: 6px;
     color: var(--fg-muted);
-    font-size: 11px;
+    font-size: 12.5px;
   }
 
   .tab:hover:not(.active) {
-    background: var(--bg-active);
+    background: var(--bg-hover);
   }
 
   .tab.active {
     background: var(--bg);
     color: var(--fg);
-  }
-
-  .tab.active::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--accent);
-  }
-
-  .label {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
+    box-shadow:
+      0 0 0 0.5px var(--border-strong),
+      var(--btn-shadow);
   }
 
   .t {
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .kind {
-    display: inline-flex;
-    flex: none;
-    opacity: 0.7;
-  }
-
-  .active .kind {
-    color: var(--accent);
-    opacity: 1;
+  .t.query {
+    font-style: italic;
   }
 
   .close {
@@ -139,10 +156,10 @@
     left: 5px;
     top: 50%;
     transform: translateY(-50%);
-    width: 17px;
-    min-width: 17px;
-    min-height: 17px;
-    height: 17px;
+    width: 16px;
+    min-width: 16px;
+    min-height: 16px;
+    height: 16px;
     border-radius: 4px;
     opacity: 0;
   }
@@ -157,12 +174,10 @@
 
   .add {
     flex: none;
-    align-self: center;
-    margin: 0 4px;
+    width: 24px;
+    min-width: 24px;
+    min-height: 24px;
+    height: 24px;
     border-radius: 6px;
-  }
-
-  .add:hover:not(:disabled) {
-    background: var(--bg-active);
   }
 </style>

@@ -7,6 +7,7 @@ import type {
   ColumnInfo,
   ColumnMeta,
   ConnectionConfig,
+  LogEntry,
   QueryStatus,
   Row,
   SchemaSnapshot,
@@ -231,6 +232,28 @@ function split(sql: string): StatementSpan[] {
 const queries = new Map<string, { statements: StatementSpan[]; started: number }>()
 let nextId = 1
 
+// Console pane: statements a real server would have been sent.
+const sqlLog: LogEntry[] = []
+let logSeq = 0
+function logSql(sql: string) {
+  sqlLog.push({ seq: ++logSeq, atMs: Date.now(), sql })
+  if (sqlLog.length > 2000) sqlLog.shift()
+}
+
+// AI assistant: a key is "saved" until the settings dialog removes it.
+let assistantKey = true
+const assistantCancels = new Map<string, () => void>()
+const CANNED_REPLY = `Here is a query for that. It reads the most recent rows from \`customers\`, newest first.
+
+\`\`\`sql
+SELECT id, email, name
+FROM public.customers
+ORDER BY id DESC
+LIMIT 10;
+\`\`\`
+
+Change \`LIMIT\` to see more rows, or add a \`WHERE\` clause to narrow them down.`
+
 async function handle(cmd: string, args: Record<string, any>): Promise<unknown> {
   await delay(cmd.startsWith('browse') || cmd.startsWith('query') ? 40 : 15)
   switch (cmd) {
@@ -249,6 +272,8 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
     case 'connection_test':
       return { serverVersion: 'PostgreSQL 17.6', elapsedMs: 4 }
     case 'connection_open':
+      logSql('SELECT current_setting(\'server_version\')')
+      logSql('SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname')
       return session(args.id)
     case 'connection_close':
       return null
@@ -259,8 +284,15 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
     case 'schema_tables':
       return args.schema === 'billing' ? BILLING : TABLES
     case 'schema_snapshot':
+      logSql(`SELECT schema_name FROM information_schema.schemata WHERE catalog_name = '${args.database}' ORDER BY schema_name`)
+      logSql(
+        `SELECT c.relname, c.relkind, c.reltuples::bigint FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r','v','m','f') ORDER BY c.relname`,
+      )
       return snapshot(args.database)
     case 'table_structure':
+      logSql(
+        `SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_schema = 'public' AND table_name = '${args.table.name}' ORDER BY ordinal_position`,
+      )
       return structure(args.table)
     case 'browse_page': {
       const req = args.request as BrowseRequest
@@ -268,16 +300,13 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
       const total = rowCountFor(req.table)
       const rows: Row[] = []
       for (let i = args.offset; i < Math.min(total, args.offset + args.limit); i++) rows.push(columns.map((c) => cell(c, i)))
-      return {
-        columns: meta(columns),
-        rows,
-        offset: args.offset,
-        query: `SELECT * FROM "public"."${req.table.name}" ORDER BY "id" LIMIT ${args.limit} OFFSET ${args.offset}`,
-        elapsedMs: 3,
-      }
+      const query = `SELECT * FROM "public"."${req.table.name}" ORDER BY "id" LIMIT ${args.limit} OFFSET ${args.offset}`
+      logSql(query)
+      return { columns: meta(columns), rows, offset: args.offset, query, elapsedMs: 3 }
     }
     case 'browse_count': {
       const n = rowCountFor((args.request as BrowseRequest).table)
+      logSql(`SELECT count(*) FROM "public"."${(args.request as BrowseRequest).table.name}"`)
       return n > 100_000 ? { exact: null, estimate: n } : { exact: n, estimate: n }
     }
     case 'cell_fetch':
@@ -287,6 +316,7 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
     case 'query_run': {
       const id = `q${nextId++}`
       const statements = split(args.sql)
+      for (const st of statements) logSql(st.sql)
       queries.set(id, { statements, started: Date.now() })
       return { queryId: id, statements }
     }
@@ -316,6 +346,9 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
     case 'changes_preview':
       return ['UPDATE "public"."big_table" SET "name" = \'edited\' WHERE "id" = 1 AND "name" = \'row 1\';']
     case 'changes_apply':
+      logSql('BEGIN')
+      logSql('UPDATE "public"."big_table" SET "name" = \'edited\' WHERE "id" = 1 AND "name" = \'row 1\';')
+      logSql('COMMIT')
       return { statements: 1, rowsAffected: 1 }
     case 'export_start':
     case 'import_start':
@@ -324,6 +357,37 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
       return { rows: 1000, bytes: 52000, done: true, cancelled: false, error: null, warning: null }
     case 'csv_preview':
       return { headers: ['id', 'name'], rows: [['1', 'a'], ['2', 'b']], delimiter: ',' }
+    case 'query_log_since':
+      return sqlLog.filter((e) => e.seq > args.seq)
+    case 'query_log_clear':
+      sqlLog.length = 0
+      return null
+    case 'assistant_key_status':
+      return assistantKey
+    case 'assistant_key_set':
+      assistantKey = String(args.key).trim().length > 0
+      return null
+    case 'assistant_cancel':
+      assistantCancels.get(args.requestId)?.()
+      return null
+    case 'assistant_ask': {
+      const req = args.req as { requestId?: string | null }
+      if (!assistantKey) {
+        throw { kind: 'invalidInput', message: 'Add your Anthropic API key in Settings to use the assistant.', code: null, statement: null }
+      }
+      return new Promise((resolve, reject) => {
+        const id = req.requestId ?? ''
+        const timer = setTimeout(() => {
+          assistantCancels.delete(id)
+          resolve({ text: CANNED_REPLY })
+        }, 600)
+        assistantCancels.set(id, () => {
+          clearTimeout(timer)
+          assistantCancels.delete(id)
+          reject({ kind: 'cancelled', message: 'cancelled', code: null, statement: null })
+        })
+      })
+    }
     default:
       if (cmd.startsWith('plugin:')) return null
       return null

@@ -49,6 +49,11 @@
     | 'sun'
     | 'moon'
     | 'grid'
+    | 'terminal'
+    | 'sparkle'
+    | 'panel-bottom'
+    | 'sidebar'
+    | 'send'
 
   const PATHS: Record<IconName, string> = {
     table: 'M2.5 3.5h11v9h-11z M2.5 6.5h11 M2.5 9.5h11 M6.5 6.5v6',
@@ -96,6 +101,11 @@
     sun: '',
     moon: '',
     grid: '',
+    terminal: '',
+    sparkle: '',
+    'panel-bottom': '',
+    sidebar: '',
+    send: '',
   }
 
   // Icons drawn on a 24×24 grid (from the Table Pulse concept), as inner SVG markup.
@@ -118,6 +128,11 @@
     database: '<ellipse cx="12" cy="5" rx="8.5" ry="3.1"/><path d="M3.5 5v14c0 2 17 4 17 0V5M3.5 12c0 4 17 4 17 0"/>',
     table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/>',
     grid: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/>',
+    terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9.5 3 2.5-3 2.5m5 0h5"/>',
+    sparkle: '<path d="M12 3.5l1.9 5.1 5.1 1.9-5.1 1.9-1.9 5.1-1.9-5.1L5 10.5l5.1-1.9L12 3.5z"/><path d="M18.5 15.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"/>',
+    'panel-bottom': '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 14.5h18"/>',
+    sidebar: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/>',
+    send: '<path d="M12 19V5m-6 6 6-6 6 6"/>',
   }
 </script>
 

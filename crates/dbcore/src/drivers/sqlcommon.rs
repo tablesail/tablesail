@@ -23,6 +23,7 @@ use crate::model::{
     ApplyResult, BrowseRequest, ColumnMeta, Editability, RowChange, TableKind, TableRef,
     TableStructure,
 };
+use crate::querylog::{logged, record};
 use crate::value::Row;
 
 /// How long a fetched `TableStructure` is reused (preview, then apply, reuse one fetch).
@@ -340,11 +341,10 @@ where
     for<'c> &'c mut DB::Connection: sqlx::Executor<'c, Database = DB>,
 {
     let mut tx = pool.begin().await?;
+    record("BEGIN");
     let mut total = 0;
     for (i, sql) in statements.iter().enumerate() {
-        let outcome = sqlx::raw_sql(sqlx::AssertSqlSafe(sql.clone()))
-            .execute(&mut *tx)
-            .await;
+        let outcome = sqlx::raw_sql(logged(sql.clone())).execute(&mut *tx).await;
         let failure = match outcome {
             Ok(res) => {
                 let n = res.affected();
@@ -369,6 +369,7 @@ where
         }
     }
     tx.commit().await?;
+    record("COMMIT");
     Ok(ApplyResult {
         statements: statements.len() as u64,
         rows_affected: total,
@@ -383,12 +384,10 @@ where
     for<'c> &'c mut DB::Connection: sqlx::Executor<'c, Database = DB>,
 {
     let mut tx = pool.begin().await?;
+    record("BEGIN");
     let mut total = 0;
     for sql in statements {
-        match sqlx::raw_sql(sqlx::AssertSqlSafe(sql.clone()))
-            .execute(&mut *tx)
-            .await
-        {
+        match sqlx::raw_sql(logged(sql.clone())).execute(&mut *tx).await {
             Ok(res) => total += res.affected(),
             Err(e) => {
                 let _ = tx.rollback().await;
@@ -397,6 +396,7 @@ where
         }
     }
     tx.commit().await?;
+    record("COMMIT");
     Ok(total)
 }
 

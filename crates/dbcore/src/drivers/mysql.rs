@@ -33,6 +33,7 @@ use crate::model::{
     IndexInfo, Page, RowCount, SslMode, StatementKind, TableInfo, TableKind, TableRef,
     TableStructure, TypeFamily,
 };
+use crate::querylog::logged;
 use crate::split::statement_kind;
 use crate::value::{Row as DbRow, Value};
 
@@ -59,9 +60,7 @@ pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
                         }
                         .quote_string(&tolerant)
                     );
-                    sqlx::raw_sql(AssertSqlSafe(set))
-                        .execute(&mut *conn)
-                        .await?;
+                    sqlx::raw_sql(logged(set)).execute(&mut *conn).await?;
                 }
                 Ok(())
             })
@@ -396,9 +395,7 @@ fn rows_as_text(rows: &[MySqlRow]) -> Result<TextRows> {
 
 /// Runs a catalog query over the text protocol; every cell comes back as text.
 async fn text_rows(pool: &MySqlPool, sql: &str) -> Result<TextRows> {
-    let rows = sqlx::raw_sql(AssertSqlSafe(sql.to_owned()))
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::raw_sql(logged(sql)).fetch_all(pool).await?;
     rows_as_text(&rows)
 }
 
@@ -407,9 +404,7 @@ async fn fetch_text(
     conn: &mut sqlx::mysql::MySqlConnection,
     sql: &str,
 ) -> std::result::Result<String, sqlx::Error> {
-    let row = sqlx::raw_sql(AssertSqlSafe(sql.to_owned()))
-        .fetch_one(&mut *conn)
-        .await?;
+    let row = sqlx::raw_sql(logged(sql)).fetch_one(&mut *conn).await?;
     let b: &[u8] = row.try_get_unchecked(0)?;
     Ok(String::from_utf8_lossy(b).into_owned())
 }
@@ -551,10 +546,7 @@ impl MysqlDriver {
         {
             let use_db = format!("USE {}", self.dialect.quote_ident(&db));
             let conn = &mut **lease.conn();
-            match sqlx::raw_sql(AssertSqlSafe(use_db))
-                .execute(&mut *conn)
-                .await
-            {
+            match sqlx::raw_sql(logged(use_db)).execute(&mut *conn).await {
                 Ok(_) => lease.db = Some(db),
                 Err(e) => {
                     let err = Error::from(e);
@@ -808,7 +800,7 @@ impl CancelHandle for MysqlCancel {
         if !self.state.request() {
             return Ok(());
         }
-        sqlx::raw_sql(AssertSqlSafe(format!("KILL QUERY {}", self.id)))
+        sqlx::raw_sql(logged(format!("KILL QUERY {}", self.id)))
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -894,7 +886,7 @@ impl Driver for MysqlDriver {
             Arc::new(Vec::new())
         };
         let sql = select_sql(self.dialect, &request, &key, Some((limit, offset)))?;
-        let rows = sqlx::raw_sql(AssertSqlSafe(sql.clone()))
+        let rows = sqlx::raw_sql(logged(sql.clone()))
             .fetch_all(&self.pool)
             .await?;
         let cols = match rows.first() {
@@ -1024,7 +1016,7 @@ async fn stream_statement(
     let mut cols: Vec<MyCol> = Vec::new();
     let mut deferred: Option<u64> = None;
     {
-        let mut stream = sqlx::raw_sql(AssertSqlSafe(sql.to_owned())).fetch_many(&mut *conn);
+        let mut stream = sqlx::raw_sql(logged(sql)).fetch_many(&mut *conn);
         while let Some(item) = stream.next().await {
             match item? {
                 Either::Right(row) => {

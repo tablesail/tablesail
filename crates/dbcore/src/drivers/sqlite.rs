@@ -29,6 +29,7 @@ use crate::model::{
     IndexInfo, Page, RowCount, StatementKind, TableInfo, TableKind, TableRef, TableStructure,
     TypeFamily,
 };
+use crate::querylog::logged;
 use crate::split::statement_kind;
 use crate::value::{Row as DbRow, Value};
 
@@ -77,9 +78,11 @@ pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
 
     // Reading the schema forces SQLite to validate the header ("file is not a database").
     let version: String = {
-        let row = sqlx::raw_sql("SELECT sqlite_version(), (SELECT count(*) FROM sqlite_master)")
-            .fetch_one(&pool)
-            .await?;
+        let row = sqlx::raw_sql(logged(
+            "SELECT sqlite_version(), (SELECT count(*) FROM sqlite_master)",
+        ))
+        .fetch_one(&pool)
+        .await?;
         sqlite_text(&row, 0)?.unwrap_or_default()
     };
     Ok(Arc::new(SqliteDriver {
@@ -299,9 +302,7 @@ fn db_name(database: &str) -> &str {
 
 impl SqliteDriver {
     async fn text_rows(&self, sql: &str) -> Result<TextRows> {
-        let rows = sqlx::raw_sql(AssertSqlSafe(sql.to_owned()))
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::raw_sql(logged(sql)).fetch_all(&self.pool).await?;
         rows.iter()
             .map(|r| (0..r.len()).map(|i| sqlite_text(r, i)).collect())
             .collect()
@@ -674,7 +675,7 @@ impl Driver for SqliteDriver {
             Arc::new(Vec::new())
         };
         let sql = select_sql(DIALECT, request, &key, Some((limit, offset)))?;
-        let rows = sqlx::raw_sql(AssertSqlSafe(sql.clone()))
+        let rows = sqlx::raw_sql(logged(sql.clone()))
             .fetch_all(&self.pool)
             .await?;
         let cols = match rows.first() {
@@ -706,9 +707,7 @@ impl Driver for SqliteDriver {
 
     async fn count_rows(&self, request: &BrowseRequest) -> Result<RowCount> {
         let sql = count_sql(DIALECT, request)?;
-        let row = sqlx::raw_sql(AssertSqlSafe(sql))
-            .fetch_one(&self.pool)
-            .await?;
+        let row = sqlx::raw_sql(logged(sql)).fetch_one(&self.pool).await?;
         let n: i64 = row.try_get_unchecked(0)?;
         Ok(RowCount {
             exact: Some(n.max(0) as u64),
@@ -795,7 +794,7 @@ async fn stream_statement(
     let mut cols: Vec<Col> = Vec::new();
     let mut deferred: Option<u64> = None;
     {
-        let mut stream = sqlx::raw_sql(AssertSqlSafe(sql.to_owned())).fetch_many(&mut *conn);
+        let mut stream = sqlx::raw_sql(logged(sql)).fetch_many(&mut *conn);
         while let Some(item) = stream.next().await {
             match item? {
                 Either::Right(row) => {

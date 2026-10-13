@@ -25,6 +25,9 @@ class UiStore {
   /** Which panel the left explorer shows. */
   rail = $state<RailView>('browser')
   palette = $state(false)
+  /** Bottom query log pane under the grid. */
+  console = $state(false)
+  sidebarHidden = $state(false)
   settings = $state(false)
   exportRequest = $state<ExportRequest | null>(null)
   importRequest = $state<ImportRequest | null>(null)
