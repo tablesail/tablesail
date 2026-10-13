@@ -43,6 +43,35 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "DeveloperTool",
+    "publisher": "TableSoft contributors",
+    "copyright": "Copyright (c) 2026 TableSoft contributors",
+    "license": "MIT",
+    "shortDescription": "A fast, free, open-source database client",
+    "longDescription": "TableSoft is a fast, free and open-source desktop client for PostgreSQL, MySQL, MariaDB, SQLite and MongoDB, with a virtualized data grid, SQL editor, safe editing, SSH tunnels and streaming export.",
+    "createUpdaterArtifacts": true,
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/OWNER/REPO/releases/latest/download/latest.json"
+      ],
+      "pubkey": "REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

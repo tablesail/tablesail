@@ -1,8 +1,8 @@
 # TableSoft
 
 A fast, open-source desktop database client: Svelte UI → Tauri → Rust core,
-shipping as one binary for macOS, Windows and Linux. Laravel-aware features are
-the differentiator. See [PLAN.md](PLAN.md) for the roadmap and hard targets.
+shipping as one binary for macOS, Windows and Linux. Free forever under the MIT
+licence. See [PLAN.md](PLAN.md) for the roadmap and hard targets.
 
 ## Layout
 
@@ -61,3 +61,17 @@ cargo test -p dbcore
 SQLite always runs (in memory). Server engines are skipped with a message when
 their container is not running; set `TABLESOFT_REQUIRE_DBS=1` to make that a
 failure instead, as CI does.
+
+## Install
+
+Download the latest build for your platform from the GitHub Releases page
+(dmg, msi/exe, AppImage/deb). The app updates itself from new releases.
+
+## Releasing
+
+Push a `v*` tag and CI builds all platforms into a draft release. See
+[docs/RELEASING.md](docs/RELEASING.md) for the one-time setup and steps.
+
+## Licence
+
+[MIT](LICENSE). The landing page lives in `site/` and is plain static HTML.
