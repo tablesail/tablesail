@@ -2,6 +2,23 @@ import { mount } from 'svelte'
 import './app.css'
 import App from './App.svelte'
 
+// WebKit (macOS/Linux web views) auto-capitalizes, autocorrects and spellchecks
+// text fields by default, which mangles hostnames, usernames, SQL and cell values.
+// Turn all of it off for every field, including ones created later.
+document.addEventListener(
+  'focusin',
+  (e) => {
+    const el = e.target
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable)) {
+      el.setAttribute('autocapitalize', 'off')
+      el.setAttribute('autocorrect', 'off')
+      el.setAttribute('autocomplete', 'off')
+      el.spellcheck = false
+    }
+  },
+  true,
+)
+
 const app = mount(App, {
   target: document.getElementById('app')!,
 })
