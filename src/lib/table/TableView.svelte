@@ -42,6 +42,7 @@
   import { inspector } from '../stores/inspector.svelte'
   import { pulse } from '../stores/pulse.svelte'
   import { tabs } from '../stores/tabs.svelte'
+  import { load as loadSaved, save as saveSaved } from '../stores/persist'
   import RowMenu from './RowMenu.svelte'
   import type { RowMenuItem } from './menu'
   import CellEditor from './editors/CellEditor.svelte'
@@ -172,7 +173,7 @@
     matchAll: applied.matchAll,
     rawWhere: applied.rawWhere,
     sort,
-    columns: [],
+    columns: projection(),
   })
   const appliedCount = $derived(applied.filters.length + (applied.rawWhere ? 1 : 0))
   const rowCount = $derived(store.insertCount + total)
@@ -234,8 +235,39 @@
       matchAll: applied.matchAll,
       rawWhere: applied.rawWhere,
       sort,
-      columns: [],
+      columns: projection(),
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hidden columns ("Columns" button): projected away on the server; keys always load.
+  // ---------------------------------------------------------------------------
+
+  let hidden = $state<string[]>([])
+  let columnsMenu = $state<{ x: number; y: number } | null>(null)
+  const hiddenKey = $derived(
+    `tablesoft.hiddenColumns.${session.config.id}.${[table.database, table.schema, table.name].join('.')}`,
+  )
+
+  function projection(): string[] {
+    if (hidden.length === 0 || !structure) return []
+    return structure.columns.map((c) => c.name).filter((n) => !hidden.includes(n) || structure!.primaryKey.includes(n))
+  }
+
+  function setHidden(next: string[]) {
+    hidden = next
+    saveSaved(hiddenKey, next)
+    if (tabId) tabs.keep(tabId)
+    resetData(true)
+  }
+
+  function toggleColumn(name: string) {
+    setHidden(hidden.includes(name) ? hidden.filter((n) => n !== name) : [...hidden, name])
+  }
+
+  function openColumnsMenu(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    columnsMenu = columnsMenu ? null : { x: r.right, y: r.top }
   }
 
   function setColumns(next: ColumnMeta[]) {
@@ -353,8 +385,14 @@
     draftPrompt = null
     lastMs = null
     lastQuery = ''
+    hidden = loadSaved<string[]>(hiddenKey, [])
+    columnsMenu = null
     resetData(false)
-    void loadStructure().then(checkDraft)
+    void loadStructure().then(() => {
+      // The first page was fetched before the structure was known; re-fetch without hidden columns.
+      if (hidden.length && structure) resetData(true)
+      checkDraft()
+    })
   }
 
   $effect(() => {
@@ -1113,6 +1151,9 @@
       <button class="bb" class:on={showFilters || (appliedCount > 0 && !quick)} title="Filters (⌘F)" onclick={toggleFilters}>
         <Icon name="filter" size={12} /> Filters{#if appliedCount > 0 && !quick}<span class="count">{appliedCount}</span>{/if}
       </button>
+      <button class="bb" class:on={!!columnsMenu || hidden.length > 0} disabled={!structure} title="Show or hide columns" onclick={openColumnsMenu}>
+        <Icon name="columns" size={12} /> Columns{#if hidden.length > 0}<span class="count">{hidden.length}</span>{/if}
+      </button>
     {/if}
     <div class="grp">
       {#if tab === 'data'}
@@ -1123,6 +1164,28 @@
     </div>
   </div>
 </div>
+
+{#if columnsMenu && structure}
+  {@const pos = columnsMenu}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="pop-scrim" onclick={() => (columnsMenu = null)}></div>
+  <div class="colpop" style:right="{window.innerWidth - pos.x}px" style:bottom="{window.innerHeight - pos.y + 6}px" role="dialog" aria-label="Columns">
+    <div class="colpop-head">
+      <span>Columns</span>
+      <button class="link" disabled={hidden.length === 0} onclick={() => setHidden([])}>Show all</button>
+    </div>
+    <div class="colpop-list">
+      {#each structure.columns as c (c.name)}
+        {@const isKey = structure.primaryKey.includes(c.name)}
+        <label class="colpop-item" class:key={isKey} title={isKey ? 'Primary key columns always load (needed for editing)' : c.dataType}>
+          <input type="checkbox" checked={!hidden.includes(c.name) || isKey} disabled={isKey} onchange={() => toggleColumn(c.name)} />
+          <span class="cn">{c.name}</span>
+          <span class="ct">{c.dataType}</span>
+        </label>
+      {/each}
+    </div>
+  </div>
+{/if}
 
 {#if menu}
   <RowMenu x={menu.x} y={menu.y} items={menu.items} onClose={closeMenu} />
@@ -1485,6 +1548,97 @@
 
   .quick input:focus {
     box-shadow: none;
+  }
+
+  .pop-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+
+  .colpop {
+    position: fixed;
+    z-index: 41;
+    width: 280px;
+    max-height: min(420px, 70vh);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-elev);
+    border: 0.5px solid var(--border-strong);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+    font-size: 12px;
+  }
+
+  .colpop-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 10px;
+    border-bottom: 0.5px solid var(--border);
+    font-weight: 600;
+  }
+
+  .link {
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-size: 12px;
+    color: var(--info);
+  }
+
+  .link:hover:not(:disabled) {
+    background: none;
+    text-decoration: underline;
+  }
+
+  .colpop-list {
+    overflow: auto;
+    padding: 4px;
+  }
+
+  .colpop-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 24px;
+    padding: 0 6px;
+    border-radius: 5px;
+  }
+
+  .colpop-item:hover {
+    background: var(--bg-hover);
+  }
+
+  .colpop-item input {
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  .cn {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--mono);
+  }
+
+  .ct {
+    flex: none;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--fg-faint);
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+
+  .colpop-item.key .cn {
+    color: var(--fg-muted);
   }
 
   .sql-block {
