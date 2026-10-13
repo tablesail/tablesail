@@ -155,6 +155,50 @@
     return saved.list.filter((s) => !q || s.name.toLowerCase().includes(q) || s.sql.toLowerCase().includes(q))
   })
 
+  let listEl = $state<HTMLDivElement>()
+
+  function rowEls(): HTMLElement[] {
+    return listEl ? [...listEl.querySelectorAll<HTMLElement>('.row')] : []
+  }
+
+  /** Arrow keys walk the tree; Enter opens (keeps) the table; Right/Left expand and collapse. */
+  function onListKey(e: KeyboardEvent) {
+    const rows = rowEls()
+    const i = rows.indexOf(document.activeElement as HTMLElement)
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      const next = rows[i < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]
+      next?.focus()
+      next?.scrollIntoView({ block: 'nearest' })
+      next?.click()
+    } else if (i >= 0 && e.key === 'Enter') {
+      e.preventDefault()
+      rows[i].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    } else if (i >= 0 && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      e.preventDefault()
+      const open = rows[i].getAttribute('aria-expanded') === 'true'
+      if ((e.key === 'ArrowRight') !== open) rows[i].querySelector<HTMLElement>('.twist')?.click()
+    }
+  }
+
+  function onSearchKey(e: KeyboardEvent) {
+    if (e.key === 'Escape' && filter) {
+      e.preventDefault()
+      filter = ''
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const first = rowEls()[0]
+      first?.focus()
+      first?.click()
+    } else if (e.key === 'Enter' && ui.rail === 'browser') {
+      const first = rowEls()[0]
+      if (first) {
+        e.preventDefault()
+        first.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+      }
+    }
+  }
+
   let placeholder = $derived(ui.rail === 'history' ? 'Search history…' : ui.rail === 'saved' ? 'Search queries…' : 'Search for item…')
 </script>
 
@@ -172,11 +216,15 @@
   <div class="top">
     <label class="search">
       <Icon name="search" size={13} />
-      <input type="search" {placeholder} bind:value={filter} spellcheck="false" />
+      <input type="search" {placeholder} bind:value={filter} spellcheck="false" onkeydown={onSearchKey} />
+      {#if filter}
+        <button class="clear-x" aria-label="Clear search" title="Clear" onclick={() => (filter = '')}><Icon name="close" size={8} strokeWidth={2.2} /></button>
+      {/if}
     </label>
   </div>
 
-  <div class="list">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="list" bind:this={listEl} onkeydown={onListKey}>
     {#if ui.rail === 'browser'}
       {#if !entry.snapshot && entry.loading}
         <div class="note">Loading schema…</div>
@@ -398,6 +446,24 @@
     box-shadow: none;
   }
 
+  .clear-x {
+    flex: none;
+    width: 15px;
+    min-width: 15px;
+    height: 15px;
+    min-height: 15px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--fg-faint);
+    box-shadow: none;
+    color: var(--bg);
+  }
+
+  .clear-x:hover:not(:disabled) {
+    background: var(--fg-muted);
+  }
+
   .list {
     flex: 1;
     overflow-y: auto;
@@ -459,6 +525,10 @@
 
   .row:hover {
     background: var(--bg-hover);
+  }
+
+  .row:focus-visible:not(.active) {
+    box-shadow: inset 0 0 0 1.5px var(--accent);
   }
 
   .row.active,
