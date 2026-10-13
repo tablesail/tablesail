@@ -63,14 +63,12 @@
   .bar {
     display: flex;
     align-items: stretch;
-    gap: 2px;
-    height: 47px;
-    padding-left: 12px;
     background: var(--bg-tabbar);
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
     overflow-y: hidden;
     flex: none;
+    height: 32px;
   }
 
   .bar::-webkit-scrollbar {
@@ -79,18 +77,19 @@
 
   .tab {
     position: relative;
-    flex: 0 0 auto;
-    min-width: 120px;
-    max-width: 195px;
+    flex: 1 1 0;
+    min-width: 110px;
+    max-width: 260px;
     display: flex;
     align-items: center;
-    padding: 0 30px 0 13px;
+    padding: 0 26px;
+    border-right: 1px solid var(--border);
     color: var(--fg-muted);
     font-size: 11px;
   }
 
   .tab:hover:not(.active) {
-    background: var(--bg-hover);
+    background: var(--bg-active);
   }
 
   .tab.active {
@@ -112,7 +111,8 @@
     flex: 1;
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    gap: 5px;
     min-width: 0;
     overflow: hidden;
     white-space: nowrap;
@@ -126,28 +126,32 @@
   .kind {
     display: inline-flex;
     flex: none;
+    opacity: 0.7;
+  }
+
+  .active .kind {
+    color: var(--accent);
+    opacity: 1;
   }
 
   .close {
     position: absolute;
-    right: 8px;
+    left: 5px;
     top: 50%;
     transform: translateY(-50%);
-    width: 18px;
-    min-width: 18px;
-    min-height: 18px;
-    height: 18px;
+    width: 17px;
+    min-width: 17px;
+    min-height: 17px;
+    height: 17px;
     border-radius: 4px;
     opacity: 0;
   }
 
-  .tab.active .close,
   .tab:hover .close {
-    opacity: 0.6;
+    opacity: 1;
   }
 
   .close:hover:not(:disabled) {
-    opacity: 1;
     background: var(--bg-active);
   }
 
@@ -159,6 +163,6 @@
   }
 
   .add:hover:not(:disabled) {
-    background: var(--bg-hover);
+    background: var(--bg-active);
   }
 </style>

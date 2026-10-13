@@ -1,7 +1,7 @@
 // Pure geometry for the virtualised grid (no DOM, no Svelte).
 
-export const ROW_H = 36
-export const HEADER_H = 38
+export const ROW_H = 28
+export const HEADER_H = 30
 /** Browsers cap element heights (~16M px WebKit, ~33M Chrome); beyond this the scroll range is scaled. */
 export const MAX_SCROLL_H = 8_000_000
 

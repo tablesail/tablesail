@@ -198,15 +198,15 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    min-height: 48px;
-    padding: 0 18px;
+    min-height: 36px;
+    padding: 0 8px;
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
     flex: none;
   }
 
   .tabs button {
-    min-height: 28px;
+    min-height: 24px;
     padding: 0 11px;
     border: 1px solid transparent;
     border-radius: 6px;
@@ -255,10 +255,11 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    height: 38px;
-    padding: 0 21px;
+    height: 36px;
+    padding: 0 10px;
     border-top: 1px solid var(--border);
-    font-size: 10px;
+    background: var(--bg-chrome);
+    font-size: 11px;
     color: var(--fg-muted);
     flex: none;
   }
@@ -279,7 +280,7 @@
 
   .messages {
     overflow: auto;
-    padding: 10px 22px;
+    padding: 8px 14px;
     user-select: text;
     -webkit-user-select: text;
   }

@@ -7,8 +7,6 @@
   import QueryTab from '../editor/QueryTab.svelte'
   import TableView from '../table/TableView.svelte'
   import Inspector from './Inspector.svelte'
-  import Rail from './Rail.svelte'
-  import StatusBar from './StatusBar.svelte'
   import TabBar from './TabBar.svelte'
   import TopBar from './TopBar.svelte'
   import { inspector } from '../stores/inspector.svelte'
@@ -32,7 +30,7 @@
     } catch {
       // ignore
     }
-    return 236
+    return 230
   }
 
   let sidebarWidth = $state(readWidth())
@@ -45,7 +43,7 @@
     const el = e.currentTarget as HTMLElement
     el.setPointerCapture(e.pointerId)
     const move = (ev: PointerEvent) => {
-      sidebarWidth = Math.min(600, Math.max(180, ev.clientX - 55))
+      sidebarWidth = Math.min(600, Math.max(180, ev.clientX))
     }
     const up = () => {
       el.removeEventListener('pointermove', move)
@@ -66,9 +64,8 @@
     <TopBar {session} />
     <div
       class="body"
-      style:grid-template-columns="55px {sidebarWidth}px 1px minmax(0, 1fr) {inspector.open ? '254px' : '0px'}"
+      style:grid-template-columns="{sidebarWidth}px 1px minmax(0, 1fr) {inspector.open ? '280px' : '0px'}"
     >
-      <Rail {session} />
       {#key session.sessionId}
         <Sidebar {session} />
       {/key}
@@ -112,10 +109,8 @@
                 <dl>
                   <dt><kbd>{modLabel}</kbd><kbd>T</kbd></dt>
                   <dd>New query</dd>
-                  <dt><kbd>{modLabel}</kbd><kbd>P</kbd></dt>
-                  <dd>Open any table</dd>
                   <dt><kbd>{modLabel}</kbd><kbd>K</kbd></dt>
-                  <dd>Switch connection</dd>
+                  <dd>Search tables and commands</dd>
                   <dt><kbd>{modLabel}</kbd><kbd>/</kbd></dt>
                   <dd>All shortcuts</dd>
                 </dl>
@@ -130,7 +125,6 @@
         <span></span>
       {/if}
     </div>
-    <StatusBar {session} {appVersion} />
   {/if}
 </div>
 
@@ -156,7 +150,7 @@
 
   @media (max-width: 1120px) {
     .body {
-      grid-template-columns: 55px 213px 1px minmax(0, 1fr) 0 !important;
+      grid-template-columns: 213px 1px minmax(0, 1fr) 0 !important;
     }
 
     .body > :global(.inspector) {

@@ -17,7 +17,7 @@ export interface InspectedRow {
 }
 
 class InspectorStore {
-  open = $state(true)
+  open = $state(false)
   current = $state<InspectedRow | null>(null)
 
   show(row: InspectedRow) {

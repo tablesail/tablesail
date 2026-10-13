@@ -108,16 +108,6 @@
   const MAX_INITIAL_W = 400
   const MAX_RESIZE_W = 1600
   const ROW_OVERSCAN = 6
-  /** Compact type label for the header: "timestamp with time zone" → "timestamptz". */
-  function shortType(t: string): string {
-    const x = t.toLowerCase()
-    if (x.startsWith('timestamp with time zone')) return 'timestamptz'
-    if (x.startsWith('timestamp without time zone')) return 'timestamp'
-    if (x.startsWith('character varying')) return 'varchar'
-    if (x.startsWith('double precision')) return 'float8'
-    return x.replace(/\(.*\)$/, '')
-  }
-
   const COL_OVERSCAN_PX = 240
   const NEED_OVERSCAN = 60
   const MAX_COPY_CELLS = 250_000
@@ -267,7 +257,7 @@
     const col = columns[c]
     const hint = columnHint?.(c)
     // name + type label (≈10px font) + optional PK/FK badge + padding and sort arrow
-    return textWidth(col.name, true) + textWidth(shortType(col.typeName)) * 0.83 + 6 + (hint ? textWidth(hint) + 14 : 0) + 44
+    return textWidth(col.name, true) + (hint ? textWidth(hint) + 14 : 0) + 40
   }
 
   function clampInitial(w: number): number {
@@ -807,7 +797,6 @@
               onclick={() => headerClick(c)}
             >
               <span class="hname">{col.name}</span>
-              <span class="htype">{shortType(col.typeName)}</span>
               {#if hint}<span class="badge">{hint}</span>{/if}
               {#if srt}<span class="sort">{srt.descending ? '▼' : '▲'}</span>{/if}
               <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -1004,7 +993,7 @@
     position: absolute;
     top: 0;
     height: 100%;
-    padding: 0 14px;
+    padding: 0 10px;
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1029,16 +1018,6 @@
     text-overflow: ellipsis;
     flex: 0 1 auto;
     min-width: 0;
-  }
-
-  .htype {
-    flex: 1 1 0;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    font-size: 9.5px;
-    font-weight: 500;
-    color: var(--fg-faint);
   }
 
   .h:hover .hname {
@@ -1158,7 +1137,7 @@
     top: 0;
     height: var(--row-h);
     line-height: calc(var(--row-h) - 1px);
-    padding: 0 14px;
+    padding: 0 10px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1179,12 +1158,12 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    height: 20px;
+    height: 18px;
     padding: 0 7px;
     border-radius: 5px;
     font-size: 10px;
     font-weight: 640;
-    line-height: 20px;
+    line-height: 18px;
     vertical-align: middle;
     color: var(--fg-muted);
     background: color-mix(in srgb, var(--fg-muted) 16%, transparent);

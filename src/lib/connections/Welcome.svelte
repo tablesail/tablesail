@@ -172,25 +172,15 @@
 
   <div class="scroll">
     <div class="inner">
-      <section class="hero">
-        <span class="mark"><Icon name="pulse" size={24} strokeWidth={1.5} /></span>
-        <h1>Your databases, one calm place.</h1>
-        <p>
-          Browse millions of rows without waiting, edit safely with a SQL preview, and keep production
-          clearly marked. PostgreSQL, MySQL, MariaDB, SQLite and MongoDB.
-        </p>
-        <div class="hero-actions">
-          <button class="primary big" onclick={() => (form = { initial: null })}><Icon name="plus" size={14} strokeWidth={1.8} /> New connection</button>
-          <button class="outline big" onclick={() => (form = { initial: { ...newConfig('sqlite'), name: '' } })}><Icon name="database" size={14} /> Open a SQLite file</button>
-        </div>
-      </section>
-
       <div class="listhead">
-        <span class="overline">Connections <span class="n">{connections.list.length}</span></span>
+        <h1>Connections <span class="n">{connections.list.length}</span></h1>
+        <span class="grow"></span>
         <label class="search">
           <Icon name="search" size={13} />
           <input type="search" placeholder="Search connections…" bind:value={search} bind:this={searchEl} spellcheck="false" />
         </label>
+        <button class="outline" onclick={() => (form = { initial: { ...newConfig('sqlite'), name: '' } })}><Icon name="database" size={13} /> Open SQLite file</button>
+        <button class="primary" onclick={() => (form = { initial: null })}><Icon name="plus" size={13} strokeWidth={1.8} /> New connection</button>
       </div>
 
       {#if connections.error}
@@ -307,68 +297,32 @@
     padding: 30px 30px 40px;
   }
 
-  .hero {
-    padding: 30px;
-    border-radius: 12px;
-    border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border-strong));
-    background: linear-gradient(135deg, var(--bg-input), color-mix(in srgb, var(--success) 12%, var(--bg-input)));
-  }
-
-  .mark {
-    display: grid;
-    place-items: center;
-    width: 46px;
-    height: 46px;
-    margin-bottom: 20px;
-    border-radius: 12px;
-    background: var(--accent);
-    color: var(--accent-fg);
-    box-shadow: 0 0 22px color-mix(in srgb, var(--accent) 18%, transparent);
-  }
-
   h1 {
     margin: 0;
-    font-size: 28px;
-    font-weight: 760;
-    letter-spacing: -0.05em;
-  }
-
-  .hero p {
-    max-width: 560px;
-    margin: 12px 0 22px;
-    line-height: 1.8;
-    color: var(--fg-muted);
-  }
-
-  .hero-actions {
-    display: flex;
-    gap: 9px;
-  }
-
-  .big {
-    min-height: 34px;
-    padding: 0 14px;
-    gap: 7px;
+    font-size: 18px;
+    font-weight: 740;
+    letter-spacing: -0.03em;
   }
 
   .listhead {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    margin: 34px 0 14px;
+    gap: 8px;
+    margin: 6px 0 16px;
   }
 
   .n {
-    margin-left: 6px;
-    color: var(--fg-muted);
+    margin-left: 4px;
+    font-weight: 500;
+    color: var(--fg-faint);
   }
 
   .search {
     display: flex;
     align-items: center;
     gap: 6px;
-    width: 260px;
-    height: 31px;
+    width: 240px;
+    height: 28px;
     padding: 0 9px;
     border: 1px solid var(--border-strong);
     border-radius: 7px;

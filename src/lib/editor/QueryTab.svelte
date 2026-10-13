@@ -278,9 +278,9 @@
   .toolbar {
     display: flex;
     align-items: center;
-    gap: 11px;
-    min-height: 46px;
-    padding: 0 16px 0 24px;
+    gap: 8px;
+    min-height: 40px;
+    padding: 0 8px 0 14px;
     border-bottom: 1px solid var(--border);
     flex: none;
   }
@@ -323,7 +323,7 @@
 
   .run {
     gap: 7px;
-    min-height: 30px;
+    min-height: 26px;
     padding: 0 12px;
     border-radius: 6px;
     font-size: 11px;
@@ -365,7 +365,7 @@
   }
 
   .db select {
-    min-height: 28px;
+    min-height: 26px;
     font-size: 11px;
     color: var(--fg);
   }
