@@ -23,6 +23,8 @@ export interface QueryTab {
   database: string
   sql: string
   title: string
+  /** Run the whole text once the editor is ready (e.g. "Run" on an assistant suggestion). */
+  runOnOpen?: boolean
 }
 
 export type Tab = TableTab | QueryTab
@@ -154,9 +156,9 @@ class TabsStore {
     if (tab?.kind === 'table' && tab.preview) tab.preview = false
   }
 
-  newQuery(sessionId: string, database: string, sql = ''): QueryTab {
+  newQuery(sessionId: string, database: string, sql = '', opts: { run?: boolean } = {}): QueryTab {
     const n = (this.queryCount[sessionId] = (this.queryCount[sessionId] ?? 0) + 1)
-    const tab: QueryTab = { id: `q${this.seq++}`, kind: 'query', sessionId, database, sql, title: `Query ${n}` }
+    const tab: QueryTab = { id: `q${this.seq++}`, kind: 'query', sessionId, database, sql, title: `Query ${n}`, runOnOpen: opts.run || undefined }
     this.list.push(tab)
     this.select(tab.id)
     return tab

@@ -12,6 +12,7 @@
   import { ui } from '../stores/ui.svelte'
   import type { SessionInfo } from '../types'
   import { parseMarkdown, type Inline } from '../util/chatMarkdown'
+  import { highlightSql } from '../util/sqlHighlight'
   import Icon from '../ui/Icon.svelte'
 
   interface Props {
@@ -97,8 +98,8 @@
     }
   }
 
-  function openInEditor(sql: string) {
-    tabs.newQuery(sessionId, database, sql)
+  function openInEditor(sql: string, run = false) {
+    tabs.newQuery(sessionId, database, sql, { run })
   }
 
   async function copy(text: string) {
@@ -161,8 +162,9 @@
                 </svelte:element>
               {:else}
                 <div class="codebox">
-                  <pre><code>{block.text}</code></pre>
+                  <pre><code class="sql">{@html highlightSql(block.text)}</code></pre>
                   <div class="codeactions">
+                    <button class="mini run" title="Open in a new query tab and run it" onclick={() => openInEditor(block.text, true)}><Icon name="play" size={10} /> Run</button>
                     <button class="mini" onclick={() => openInEditor(block.text)}>Open in editor</button>
                     <button class="mini" onclick={() => copy(block.text)}>Copy</button>
                   </div>
@@ -399,6 +401,29 @@
     padding: 0 8px;
     font-size: 11px;
     border-radius: 5px;
+  }
+
+  button.mini.run {
+    background: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 70%, #000);
+    color: var(--accent-fg);
+    font-weight: 600;
+  }
+
+  .sql :global(.k) {
+    color: var(--syn-keyword);
+  }
+
+  .sql :global(.s) {
+    color: var(--syn-string);
+  }
+
+  .sql :global(.n) {
+    color: var(--syn-number);
+  }
+
+  .sql :global(.c) {
+    color: var(--syn-comment);
   }
 
   .thinking {

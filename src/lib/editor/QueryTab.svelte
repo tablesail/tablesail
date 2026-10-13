@@ -81,6 +81,14 @@
     return spans[best].sql
   }
 
+  // Tabs opened with "Run" (assistant suggestions) execute once the editor exists.
+  $effect(() => {
+    if (tab.runOnOpen && editor && active) {
+      tab.runOnOpen = false
+      void execute(true)
+    }
+  })
+
   async function execute(all: boolean) {
     if (!editor || runner.running) return
     notice = null
