@@ -203,7 +203,8 @@
               aria-expanded={hasColumns(t) ? !!expanded[k] : undefined}
               tabindex="-1"
               title={`${t.name}${t.estimatedRows != null ? `\n≈ ${formatCount(t.estimatedRows)} rows` : ''}${t.comment ? `\n${t.comment}` : ''}`}
-              onclick={() => tabs.openTable(session.sessionId, ref(t))}
+              onclick={() => tabs.openTable(session.sessionId, ref(t), undefined, { preview: true })}
+              ondblclick={() => tabs.openTable(session.sessionId, ref(t))}
               oncontextmenu={(e) => {
                 e.preventDefault()
                 menu = { x: e.clientX, y: e.clientY, items: tableMenu(t) }

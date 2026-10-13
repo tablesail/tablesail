@@ -8,6 +8,11 @@ export interface TableTab {
   title: string
   /** Filters to apply when the tab first loads (e.g. "View related" from the inspector). */
   filters?: Filter[]
+  /**
+   * Preview tab (TablePlus-style, shown in italics): the next single-click on another table
+   * replaces it. Double-clicking, editing or filtering keeps it.
+   */
+  preview?: boolean
 }
 
 export interface QueryTab {
@@ -48,12 +53,13 @@ class TabsStore {
     if (tab) this.activeBySession[tab.sessionId] = id
   }
 
-  openTable(sessionId: string, table: TableRef, filters?: Filter[]): TableTab {
+  openTable(sessionId: string, table: TableRef, filters?: Filter[], opts: { preview?: boolean } = {}): TableTab {
     const existing = this.list.find(
       (t): t is TableTab =>
         t.kind === 'table' && t.sessionId === sessionId && sameTable(t.table, table) && !t.filters?.length && !filters?.length,
     )
     if (existing) {
+      if (!opts.preview) existing.preview = false
       this.select(existing.id)
       return existing
     }
@@ -64,10 +70,22 @@ class TabsStore {
       table: { ...table },
       title: table.name,
       filters: filters?.length ? filters : undefined,
+      preview: opts.preview || undefined,
     }
-    this.list.push(tab)
+    // A new preview takes the old preview's place instead of adding another tab.
+    const old = opts.preview
+      ? this.list.findIndex((t) => t.kind === 'table' && t.sessionId === sessionId && t.preview)
+      : -1
+    if (old >= 0) this.list.splice(old, 1, tab)
+    else this.list.push(tab)
     this.select(tab.id)
     return tab
+  }
+
+  /** Turns a preview tab into a regular one. */
+  keep(id: string) {
+    const tab = this.list.find((t) => t.id === id)
+    if (tab?.kind === 'table' && tab.preview) tab.preview = false
   }
 
   newQuery(sessionId: string, database: string, sql = ''): QueryTab {

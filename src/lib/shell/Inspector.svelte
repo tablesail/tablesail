@@ -7,7 +7,7 @@
   import AssistantPanel from './AssistantPanel.svelte'
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte'
   import Icon from '../ui/Icon.svelte'
-  import { formatValue } from '../format'
+  import { formatValue, valueToEditText } from '../format'
   import { inspector } from '../stores/inspector.svelte'
   import { pulse } from '../stores/pulse.svelte'
   import { tabs } from '../stores/tabs.svelte'
@@ -58,9 +58,59 @@
     return text.length > JSON_LIMIT ? text.slice(0, JSON_LIMIT) + '\n…' : text
   }
 
-  function fieldMenu(e: MouseEvent, name: string, text: string, isJson: boolean) {
+  /** Inline editing is for plain values; JSON, bytes and truncated text keep their viewers. */
+  function canEditField(i: number): boolean {
+    if (!cur?.edit?.canEdit(i)) return false
+    const v = cur.row[i]
+    if (typeof v === 'object' && v !== null && ('$bytes' in v || '$text' in v)) return false
+    return cur.columns[i].family !== 'binary'
+  }
+
+  function commitText(i: number, before: string, el: HTMLInputElement | HTMLTextAreaElement) {
+    if (!cur?.edit || el.value === before) return
+    cur.edit.commit(i, { kind: 'text', value: el.value })
+  }
+
+  let jsonError = $state<Record<string, string>>({})
+
+  function commitJson(i: number, before: string, el: HTMLTextAreaElement) {
+    if (!cur?.edit || el.value === before) return
+    const name = cur.columns[i].name
+    try {
+      const value = JSON.parse(el.value)
+      delete jsonError[name]
+      cur.edit.commit(i, { kind: 'json', value })
+    } catch (err) {
+      jsonError[name] = err instanceof Error ? err.message : 'Invalid JSON'
+    }
+  }
+
+  function editKeys(e: KeyboardEvent, before: string) {
+    const el = e.currentTarget as HTMLInputElement | HTMLTextAreaElement
+    if (e.key === 'Escape') {
+      el.value = before
+      el.blur()
+    } else if (e.key === 'Enter' && el instanceof HTMLInputElement) {
+      el.blur()
+    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      el.blur()
+    }
+  }
+
+  function fieldMenu(e: MouseEvent, i: number, text: string, isJson: boolean) {
+    if (!cur) return
+    const name = cur.columns[i].name
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const items: MenuItem[] = []
+    const edit = canEditField(i) || (isJson && !!cur.edit?.canEdit(i)) ? cur.edit : undefined
+    if (edit) {
+      items.push(
+        { label: 'Set NULL', onclick: () => edit.commit(i, { kind: 'null' }) },
+        { label: 'Set DEFAULT', onclick: () => edit.commit(i, { kind: 'default' }) },
+        { label: 'Set EMPTY', disabled: isJson, onclick: () => edit.commit(i, { kind: 'text', value: '' }) },
+        { separator: true },
+      )
+    }
     if (isJson) {
       items.push(
         { label: minified[name] ? 'Pretty' : '✓  Pretty', onclick: () => (minified[name] = false) },
@@ -69,7 +119,7 @@
       )
     }
     items.push({ label: 'Copy value', onclick: () => void navigator.clipboard?.writeText(text) })
-    menu = { x: r.right - 160, y: r.bottom + 4, items }
+    menu = { x: r.right - 170, y: r.bottom + 4, items }
   }
 
   /** Raw text of a value, for building an equality filter. */
@@ -124,18 +174,55 @@
         {#each fields as { c, i } (c.name + i)}
           {@const v = valueText(cur.row[i], i)}
           {@const json = jsonText(cur.row[i], i)}
+          {@const editableField = canEditField(i)}
+          {@const before = valueToEditText(cur.row[i])}
           <div class="field">
             <div class="label"><span class="lname">{c.name}</span><span class="ltype">{c.typeName}</span></div>
             <div class="box">
-              {#if json !== null}
+              {#if json !== null && cur.edit?.canEdit(i)}
+                {#key json}
+                  <textarea
+                    class="value json-edit"
+                    spellcheck="false"
+                    rows={Math.min(16, json.split('\n').length)}
+                    value={json}
+                    onkeydown={(e) => editKeys(e, json)}
+                    onchange={(e) => commitJson(i, json, e.currentTarget)}
+                  ></textarea>
+                {/key}
+              {:else if json !== null}
                 <pre class="value json" class:min={minified[c.name]}>{#each jsonTokens(json) as t, ti (ti)}<span class={t.cls}>{t.text}</span>{/each}</pre>
+              {:else if editableField}
+                {#key before}
+                  {#if before.length > 60 || before.includes('\n')}
+                    <textarea
+                      class="value edit"
+                      spellcheck="false"
+                      rows={Math.min(8, Math.ceil(before.length / 34) + before.split('\n').length)}
+                      value={before}
+                      onkeydown={(e) => editKeys(e, before)}
+                      onchange={(e) => commitText(i, before, e.currentTarget)}
+                    ></textarea>
+                  {:else}
+                    <input
+                      class="value edit {v.cls}"
+                      type="text"
+                      spellcheck="false"
+                      value={before}
+                      placeholder={cur.row[i] === null ? 'NULL' : ''}
+                      onkeydown={(e) => editKeys(e, before)}
+                      onchange={(e) => commitText(i, before, e.currentTarget)}
+                    />
+                  {/if}
+                {/key}
               {:else}
                 <div class="value {v.cls}" class:multi={v.text.length > 40 || v.text.includes('\n')}>{v.text || ' '}</div>
               {/if}
-              <button class="more" aria-label="Field options" title="Options" onclick={(e) => fieldMenu(e, c.name, json ?? v.text, json !== null)}>
+              <button class="more" aria-label="Field options" title="Options" onclick={(e) => fieldMenu(e, i, json ?? v.text, json !== null)}>
                 <Icon name="chevron-down" size={11} strokeWidth={1.8} />
               </button>
             </div>
+            {#if jsonError[c.name]}<div class="jerr">{jsonError[c.name]}</div>{/if}
           </div>
         {:else}
           <div class="empty">No matching fields.</div>
@@ -346,6 +433,34 @@
   .more:hover:not(:disabled) {
     background: var(--bg-active);
     color: var(--fg);
+  }
+
+  /* Editable fields look like the read-only boxes until focused. */
+  .value.edit,
+  .value.json-edit {
+    display: block;
+    width: 100%;
+    margin: 0;
+    resize: vertical;
+    min-height: 26px;
+    font: inherit;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 17px;
+    border-radius: 5px;
+  }
+
+  .value.json-edit {
+    font-size: 12px;
+    line-height: 18px;
+    white-space: pre;
+    max-height: 420px;
+  }
+
+  .jerr {
+    margin: 3px 1px 0;
+    font-size: 11px;
+    color: var(--danger);
   }
 
   .value.json {

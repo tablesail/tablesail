@@ -50,6 +50,7 @@
         tabindex="-1"
         title={t.kind === 'table' ? [t.table.schema, t.table.name].filter(Boolean).join('.') : t.title}
         onclick={() => tabs.select(t.id)}
+        ondblclick={() => tabs.keep(t.id)}
         onauxclick={(e) => onAux(e, t.id)}
         onmousedown={(e) => e.button === 1 && e.preventDefault()}
         onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && tabs.select(t.id)}
@@ -64,7 +65,7 @@
             tabs.close(t.id)
           }}><Icon name="close" size={9} strokeWidth={1.8} /></button
         >
-        <span class="t" class:query={t.kind !== 'table'}>{t.title}</span>
+        <span class="t" class:preview={t.kind === 'table' && t.preview}>{t.title}</span>
       </div>
     {/each}
   </div>
@@ -147,7 +148,8 @@
     white-space: nowrap;
   }
 
-  .t.query {
+  /* Preview tab: replaced by the next table you click; double-click to keep it. */
+  .t.preview {
     font-style: italic;
   }
 

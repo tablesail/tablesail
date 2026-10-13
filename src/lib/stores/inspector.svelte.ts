@@ -1,6 +1,6 @@
 // What the right-hand Row inspector shows: the selected row of the active grid.
 
-import type { ColumnMeta, ForeignKeyInfo, Row, SessionInfo, TableRef } from '../types'
+import type { CellInput, ColumnMeta, ForeignKeyInfo, Row, SessionInfo, TableRef } from '../types'
 
 export interface InspectedRow {
   /** Which tab published this, so a hidden tab never overwrites the visible one. */
@@ -14,6 +14,11 @@ export interface InspectedRow {
   primaryKey: string[]
   foreignKeys: ForeignKeyInfo[]
   editable: boolean
+  /** Present when fields can be edited from the panel (stages a pending change, like a cell edit). */
+  edit?: {
+    canEdit: (column: number) => boolean
+    commit: (column: number, input: CellInput) => void
+  }
 }
 
 class InspectorStore {

@@ -437,6 +437,11 @@
     tabs.openTable(session.sessionId, ref)
   }
 
+  // Working in a preview tab (editing, filtering, sorting) keeps it open.
+  $effect(() => {
+    if (tabId && (store.pending > 0 || appliedCount > 0 || sort.length > 0)) tabs.keep(tabId)
+  })
+
   // Publish the focused row to the Row inspector while this tab is visible.
   $effect(() => {
     void rev
@@ -455,6 +460,12 @@
       primaryKey: structure?.primaryKey ?? [],
       foreignKeys: structure?.foreignKeys ?? [],
       editable,
+      edit: editable
+        ? {
+            canEdit: (c) => canEditCell(sel.activeRow, c),
+            commit: (c, input) => commitCell(sel.activeRow, c, input),
+          }
+        : undefined,
     })
   })
 
@@ -1393,8 +1404,8 @@
   }
 
   .info {
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 0;
+    min-width: 60px;
     display: flex;
     justify-content: center;
     gap: 12px;
@@ -1445,7 +1456,8 @@
     display: flex;
     align-items: center;
     gap: 5px;
-    width: 180px;
+    flex: 0 1 180px;
+    min-width: 90px;
     height: 24px;
     padding: 0 8px;
     border: 0.5px solid var(--border-input);
