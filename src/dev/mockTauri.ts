@@ -7,12 +7,14 @@ import type {
   ColumnInfo,
   ColumnMeta,
   ConnectionConfig,
+  CoreError,
   LogEntry,
   QueryStatus,
   Row,
   SchemaSnapshot,
   SessionInfo,
   StatementSpan,
+  StatementStatus,
   TableInfo,
   TableRef,
   TableStructure,
@@ -155,6 +157,87 @@ function rowCountFor(table: TableRef): number {
   return [...TABLES, ...BILLING].find((t) => t.name === table.name)?.estimatedRows ?? 3
 }
 
+// --- Filtering and sorting for small tables, so the e2e suite can see the effect of a filter or a sort.
+// Big tables (more than SMALL_TABLE rows) are generated lazily and ignore both.
+const SMALL_TABLE = 5000
+
+function plain(v: Value | undefined): string {
+  if (v === null || v === undefined) return ''
+  if (typeof v === 'object') {
+    const inner = Object.values(v as Record<string, unknown>)[0]
+    return typeof inner === 'object' ? JSON.stringify(inner) : String(inner)
+  }
+  return String(v)
+}
+
+function compareValues(a: Value | undefined, b: Value | undefined): number {
+  if (a === null || a === undefined) return b === null || b === undefined ? 0 : -1
+  if (b === null || b === undefined) return 1
+  const x = plain(a)
+  const y = plain(b)
+  const nx = Number(x)
+  const ny = Number(y)
+  return x !== '' && y !== '' && !Number.isNaN(nx) && !Number.isNaN(ny) ? nx - ny : x.localeCompare(y)
+}
+
+function matchesFilter(v: Value | undefined, f: { op: string; value?: string | null }): boolean {
+  const text = plain(v).toLowerCase()
+  const want = String(f.value ?? '').toLowerCase()
+  switch (f.op) {
+    case 'eq':
+      return text === want
+    case 'neq':
+      return text !== want
+    case 'lt':
+      return compareValues(v, f.value as string) < 0
+    case 'lte':
+      return compareValues(v, f.value as string) <= 0
+    case 'gt':
+      return compareValues(v, f.value as string) > 0
+    case 'gte':
+      return compareValues(v, f.value as string) >= 0
+    case 'contains':
+      return text.includes(want)
+    case 'notContains':
+      return !text.includes(want)
+    case 'startsWith':
+      return text.startsWith(want)
+    case 'endsWith':
+      return text.endsWith(want)
+    case 'like':
+      return new RegExp('^' + want.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$').test(text)
+    case 'in':
+      return want.split(',').map((x) => x.trim()).includes(text)
+    case 'notIn':
+      return !want.split(',').map((x) => x.trim()).includes(text)
+    case 'isNull':
+      return v === null || v === undefined
+    case 'isNotNull':
+      return v !== null && v !== undefined
+    default:
+      return true
+  }
+}
+
+/** All rows of a small table after the request's filters and sort, or null for a big (lazy) table. */
+function filteredRows(req: BrowseRequest): Row[] | null {
+  const total = rowCountFor(req.table)
+  if (total > SMALL_TABLE) return null
+  const columns = columnsFor(req.table)
+  let rows: Row[] = Array.from({ length: total }, (_, i) => columns.map((c) => cell(c, i)))
+  const filters = (req.filters ?? []) as { column: string; op: string; value?: string | null }[]
+  if (filters.length) {
+    const test = (row: Row, f: (typeof filters)[number]) => matchesFilter(row[columns.findIndex((c) => c.name === f.column)], f)
+    rows = rows.filter((row) => (req.matchAll ? filters.every((f) => test(row, f)) : filters.some((f) => test(row, f))))
+  }
+  const sort = req.sort?.[0]
+  if (sort) {
+    const i = columns.findIndex((c) => c.name === sort.column)
+    if (i >= 0) rows = [...rows].sort((a, b) => (sort.descending ? -1 : 1) * compareValues(a[i], b[i]))
+  }
+  return rows
+}
+
 function structure(table: TableRef): TableStructure {
   const columns = columnsFor(table)
   const info = TABLES.find((t) => t.name === table.name)
@@ -229,7 +312,23 @@ function split(sql: string): StatementSpan[] {
   return spans
 }
 
-const queries = new Map<string, { statements: StatementSpan[]; started: number }>()
+const queries = new Map<string, { statements: StatementSpan[]; started: number; cancelled?: boolean }>()
+
+// Which table's columns/rows a statement "returns": the first table after FROM, big_table otherwise.
+function resultFor(sql: string): { columns: ColumnInfo[]; total: number } {
+  const name = /\bfrom\s+(?:"?\w+"?\.)?"?(\w+)"?/i.exec(sql)?.[1]
+  const known = name && [...TABLES, ...BILLING].some((t) => t.name === name) ? name : 'big_table'
+  const table = { database: 'tablesoft', schema: 'public', name: known }
+  return { columns: columnsFor(table), total: Math.min(rowCountFor(table), 5000) }
+}
+
+// Statements that fail (nonexistent table) or never finish until cancelled (pg_sleep).
+const failsSql = (sql: string) => /nonexistent/i.test(sql)
+const hangsSql = (sql: string) => /pg_sleep/i.test(sql)
+
+function failure(kind: CoreError['kind'], message: string, code: string | null = null): CoreError {
+  return { kind, message, code, statement: null }
+}
 let nextId = 1
 
 // Console pane: statements a real server would have been sent.
@@ -270,11 +369,19 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
       connections = connections.filter((c) => c.id !== args.id)
       return null
     case 'connection_test':
+      if (args.config?.host === 'down.internal') throw failure('connection', 'connection refused (os error 111)')
       return { serverVersion: 'PostgreSQL 17.6', elapsedMs: 4 }
-    case 'connection_open':
+    case 'connection_open': {
+      // Hosts that misbehave on purpose, for the connection-error and password-prompt flows.
+      const cfg = connections.find((c) => c.id === args.id)
+      if (cfg?.host === 'down.internal') throw failure('connection', 'connection refused (os error 111)')
+      if (cfg?.host === 'locked.internal' && args.secrets?.dbPassword !== 'secret') {
+        throw failure('database', 'password authentication failed for user', '28P01')
+      }
       logSql('SELECT current_setting(\'server_version\')')
       logSql('SELECT datname FROM pg_database WHERE NOT datistemplate ORDER BY datname')
       return session(args.id)
+    }
     case 'connection_close':
       return null
     case 'schema_databases':
@@ -296,16 +403,25 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
       return structure(args.table)
     case 'browse_page': {
       const req = args.request as BrowseRequest
-      const columns = columnsFor(req.table)
+      const every = columnsFor(req.table)
+      // Like the real drivers: an empty `columns` means all of them, otherwise only those, in table order.
+      const wanted = req.columns?.length ? every.filter((c) => req.columns.includes(c.name)) : every
       const total = rowCountFor(req.table)
       const rows: Row[] = []
-      for (let i = args.offset; i < Math.min(total, args.offset + args.limit); i++) rows.push(columns.map((c) => cell(c, i)))
-      const query = `SELECT * FROM "public"."${req.table.name}" ORDER BY "id" LIMIT ${args.limit} OFFSET ${args.offset}`
+      const matched = filteredRows(req)
+      if (matched) {
+        const keep = wanted.map((c) => every.indexOf(c))
+        rows.push(...matched.slice(args.offset, args.offset + args.limit).map((row) => keep.map((i) => row[i])))
+      } else {
+        for (let i = args.offset; i < Math.min(total, args.offset + args.limit); i++) rows.push(wanted.map((c) => cell(c, i)))
+      }
+      const list = req.columns?.length ? wanted.map((c) => `"${c.name}"`).join(', ') : '*'
+      const query = `SELECT ${list} FROM "public"."${req.table.name}" ORDER BY "id" LIMIT ${args.limit} OFFSET ${args.offset}`
       logSql(query)
-      return { columns: meta(columns), rows, offset: args.offset, query, elapsedMs: 3 }
+      return { columns: meta(wanted), rows, offset: args.offset, query, elapsedMs: 3 }
     }
     case 'browse_count': {
-      const n = rowCountFor((args.request as BrowseRequest).table)
+      const n = filteredRows(args.request as BrowseRequest)?.length ?? rowCountFor((args.request as BrowseRequest).table)
       logSql(`SELECT count(*) FROM "public"."${(args.request as BrowseRequest).table.name}"`)
       return n > 100_000 ? { exact: null, estimate: n } : { exact: n, estimate: n }
     }
@@ -322,26 +438,47 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
     }
     case 'query_status': {
       const q = queries.get(args.queryId)!
-      const done = Date.now() - q.started > 150
+      const elapsed = Date.now() - q.started
+      const hung = q.statements.some((s) => hangsSql(s.sql)) && !q.cancelled
+      const done = elapsed > 150 && !hung
+      const failedAt = q.statements.findIndex((s) => failsSql(s.sql))
       const status: QueryStatus = {
         queryId: args.queryId,
-        finished: done,
-        statements: q.statements.map((s, index) => ({
-          index,
-          sql: s.sql,
-          state: done ? 'done' : 'running',
-          error: null,
-          affected: s.kind === 'read' ? null : 3,
-          sets: s.kind === 'read' ? [{ setIndex: 0, columns: meta(TABLE_COLUMNS.big_table), loaded: done ? 5000 : 1000, complete: done, truncated: false }] : [],
-          elapsedMs: done ? 12 : Date.now() - q.started,
-        })),
+        finished: done || q.cancelled === true,
+        statements: q.statements.map((s, index): StatementStatus => {
+          const base = { index, sql: s.sql, elapsedMs: done ? 12 : elapsed }
+          if (q.cancelled) return { ...base, state: 'cancelled' as const, error: null, affected: null, sets: [] }
+          if (failedAt >= 0 && index > failedAt) return { ...base, state: 'pending' as const, error: null, affected: null, sets: [] }
+          if (index === failedAt) {
+            const error = { ...failure('database', 'relation "nonexistent_table" does not exist', '42P01'), statement: s.sql }
+            return done ? { ...base, state: 'error' as const, error, affected: null, sets: [] } : { ...base, state: 'running' as const, error: null, affected: null, sets: [] }
+          }
+          const r = resultFor(s.sql)
+          return {
+            ...base,
+            state: done ? ('done' as const) : ('running' as const),
+            error: null,
+            affected: s.kind === 'read' ? null : 3,
+            sets:
+              s.kind === 'read' && !hangsSql(s.sql)
+                ? [{ setIndex: 0, columns: meta(r.columns), loaded: done ? r.total : Math.min(r.total, 1000), complete: done, truncated: false }]
+                : [],
+          }
+        }),
       }
       return status
     }
+    case 'query_cancel': {
+      const q = queries.get(args.queryId)
+      if (q) q.cancelled = true
+      return null
+    }
     case 'query_fetch': {
+      const q = queries.get(args.queryId)
+      const r = resultFor(q?.statements[args.statementIndex]?.sql ?? '')
       const rows: Row[] = []
-      for (let i = args.offset; i < Math.min(5000, args.offset + args.limit); i++) rows.push(TABLE_COLUMNS.big_table.map((c) => cell(c, i)))
-      return { rows, offset: args.offset, loaded: 5000, complete: true }
+      for (let i = args.offset; i < Math.min(r.total, args.offset + args.limit); i++) rows.push(r.columns.map((c) => cell(c, i)))
+      return { rows, offset: args.offset, loaded: r.total, complete: true }
     }
     case 'changes_preview':
       return ['UPDATE "public"."big_table" SET "name" = \'edited\' WHERE "id" = 1 AND "name" = \'row 1\';']
@@ -388,6 +525,11 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
         })
       })
     }
+    // Native file dialogs: tests set window.__TABLESOFT_MOCK_DIALOG__ = { open, save } (null = cancelled).
+    case 'plugin:dialog|open':
+      return (window as any).__TABLESOFT_MOCK_DIALOG__?.open ?? null
+    case 'plugin:dialog|save':
+      return (window as any).__TABLESOFT_MOCK_DIALOG__?.save ?? null
     default:
       if (cmd.startsWith('plugin:')) return null
       return null

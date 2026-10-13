@@ -33,3 +33,7 @@ src-tauri/gen/schemas
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Playwright
+/test-results
+/playwright-report
