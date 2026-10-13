@@ -21,7 +21,7 @@ export function parseInline(text: string): Inline[] {
   const out: Inline[] = []
   // split() with a capture group puts every match at an odd index; the even parts are the
   // text between matches and must stay text even if they happen to start and end with a marker.
-  text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).forEach((part, i) => {
+  text.split(/(`[^`\n]+`|\*\*(?:[^*\n]|\*(?!\*))+\*\*)/).forEach((part, i) => {
     if (!part) return
     if (i % 2 === 0) out.push({ kind: 'text', text: part })
     else if (part.startsWith('`')) out.push({ kind: 'code', text: part.slice(1, -1) })

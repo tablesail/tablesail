@@ -63,7 +63,13 @@ describe('parseInline', () => {
     expect(parseInline('`a` and **x\ny**')).toEqual([code('a'), t(' and **x\ny**')])
   })
 
-  it.todo('bold that contains a lone asterisk (e.g. **COUNT(*)**) should be recognised')
+  it('bold that contains a lone asterisk (e.g. **COUNT(*)**) is recognised', () => {
+    expect(parseInline('use **COUNT(*)** here')).toEqual([
+      { kind: 'text', text: 'use ' },
+      { kind: 'bold', text: 'COUNT(*)' },
+      { kind: 'text', text: ' here' },
+    ])
+  })
 
   it('a single asterisk is not bold', () => {
     expect(parseInline('2 * 3 * 4')).toEqual([t('2 * 3 * 4')])
