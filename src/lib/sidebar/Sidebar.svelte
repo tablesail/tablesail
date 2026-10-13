@@ -12,7 +12,7 @@
   import { tabs } from '../stores/tabs.svelte'
   import { ui, type RailView } from '../stores/ui.svelte'
   import type { SessionInfo, TableInfo, TableKind, TableRef } from '../types'
-  import { compactCount, formatCount } from '../util/format'
+  import { formatCount } from '../util/format'
   import { plainName, selectStarter } from '../util/sql'
 
   interface Props {
@@ -155,16 +155,16 @@
 
       {#each sections as sec (sec.title)}
         <button class="section" onclick={() => (collapsed[sec.title] = !collapsed[sec.title])} aria-expanded={!collapsed[sec.title]}>
+          <span class="chev" class:open={!collapsed[sec.title]}><Icon name="chevron-right" size={10} strokeWidth={2} /></span>
           {sec.title}
           <span class="count">{sec.tables.length}</span>
-          <span class="chev" class:open={!collapsed[sec.title]}><Icon name="chevron-right" size={9} strokeWidth={2.2} /></span>
         </button>
         {#if !collapsed[sec.title]}
           {#each sec.tables as t (t.schema + '\u0000' + t.name)}
             <button
               class="row"
               class:active={isActive(t)}
-              title={t.comment ? `${t.name}\n${t.comment}` : t.name}
+              title={`${t.name}${t.estimatedRows != null ? ` · ≈ ${formatCount(t.estimatedRows)} rows` : ''}${t.comment ? `\n${t.comment}` : ''}`}
               onclick={() => tabs.openTable(session.sessionId, ref(t))}
               oncontextmenu={(e) => {
                 e.preventDefault()
@@ -173,9 +173,6 @@
             >
               <Icon name={KIND[t.kind] ?? 'table'} size={14} />
               <span class="name">{#if showSchemaInName && t.schema}<span class="dim">{t.schema}.</span>{/if}{t.name}</span>
-              {#if t.estimatedRows != null}
-                <span class="rows" title="≈ {formatCount(t.estimatedRows)} rows">{compactCount(t.estimatedRows)}</span>
-              {/if}
             </button>
           {/each}
         {/if}
@@ -343,20 +340,18 @@
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 6px;
+    gap: 5px;
     width: 100%;
-    height: 26px;
-    min-height: 26px;
-    margin-top: 6px;
-    padding: 0 6px;
+    height: 24px;
+    min-height: 24px;
+    margin-top: 4px;
+    padding: 0 4px;
     border: none;
     background: none;
     box-shadow: none;
-    font-size: 10px;
-    font-weight: 750;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--fg-faint);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg-muted);
   }
 
   .section:hover:not(:disabled) {
@@ -365,21 +360,15 @@
   }
 
   .section .count {
+    margin-left: auto;
+    font-size: 10px;
     font-weight: 500;
-    letter-spacing: 0;
+    color: var(--fg-faint);
   }
 
   .chev {
     display: inline-flex;
-    margin-left: auto;
-    opacity: 0;
-    transition:
-      transform 0.12s,
-      opacity 0.12s;
-  }
-
-  .section:hover .chev {
-    opacity: 1;
+    transition: transform 0.12s;
   }
 
   .chev.open {
@@ -408,22 +397,23 @@
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 8px;
+    gap: 7px;
     width: 100%;
-    height: 26px;
-    min-height: 26px;
-    padding: 0 8px;
+    height: 22px;
+    min-height: 22px;
+    padding: 0 8px 0 19px;
     border: none;
-    border-radius: 6px;
+    border-radius: 5px;
     background: none;
     box-shadow: none;
     text-align: left;
+    font-family: var(--mono);
     font-size: 12px;
     color: var(--fg-cell);
   }
 
   .row :global(svg) {
-    color: var(--fg-faint);
+    color: var(--info);
   }
 
   .row:hover:not(:disabled) {
@@ -454,17 +444,6 @@
 
   .dim {
     color: var(--fg-faint);
-  }
-
-  .rows {
-    font-size: 10px;
-    color: var(--fg-faint);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .row.active .rows {
-    color: inherit;
-    opacity: 0.7;
   }
 
   .item {

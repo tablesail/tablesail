@@ -1313,8 +1313,15 @@
 
   .bottombar .seg button {
     min-height: 22px;
-    padding: 0 10px;
+    padding: 0 11px;
     font-size: 11px;
+  }
+
+  .bottombar .seg button.on,
+  .bottombar .seg button.on:hover:not(:disabled) {
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 650;
   }
 
   .bb {

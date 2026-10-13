@@ -16,7 +16,8 @@
   --fg: #202a36;
   --fg-muted: #6f7d90;
   --fg-faint: #8490a1;
-  --fg-cell: #3b4859;
+  --fg-cell: #1c232d;
+  --bg-zebra: #f5f6f8;
   --border: #e3e7ee;
   --border-strong: #dce1e9;
   --border-input: #d4dce6;
@@ -47,7 +48,7 @@
   --syn-op: #6f7d90;
   --shadow-sm: 0 1px 3px rgb(16 24 40 / 0.08);
   --shadow-lg: 0 24px 64px rgb(16 24 40 / 0.18), 0 0 0 1px rgb(16 24 40 / 0.05);
-  --mono: 'SF Mono', SFMono-Regular, ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --radius: 7px;
 
   color-scheme: light;
@@ -79,7 +80,8 @@
   --fg: #e8edf5;
   --fg-muted: #8a96a8;
   --fg-faint: #5d6a7e;
-  --fg-cell: #bfcbd9;
+  --fg-cell: #dde3ec;
+  --bg-zebra: #1b212c;
   --border: #222935;
   --border-strong: #2a313e;
   --border-input: #313a47;
@@ -133,7 +135,8 @@
     --fg: #e8edf5;
     --fg-muted: #8a96a8;
     --fg-faint: #5d6a7e;
-    --fg-cell: #bfcbd9;
+    --fg-cell: #dde3ec;
+  --bg-zebra: #1b212c;
     --border: #222935;
     --border-strong: #2a313e;
     --border-input: #313a47;

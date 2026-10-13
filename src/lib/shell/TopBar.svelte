@@ -192,23 +192,24 @@
   .pill {
     flex: 0 1 auto;
     min-width: 0;
-    max-width: 56%;
-    height: 28px;
-    min-height: 28px;
+    max-width: 60%;
+    height: 30px;
+    min-height: 30px;
     gap: 7px;
-    padding: 0 12px 0 5px;
+    padding: 0 14px 0 6px;
     border-radius: 8px;
-    background: var(--bg-input);
-    border: 1px solid var(--border-strong);
+    background: color-mix(in srgb, var(--env) 13%, var(--bg-input));
+    border: 1px solid color-mix(in srgb, var(--env) 30%, transparent);
     box-shadow: none;
-    font-size: 11px;
+    font-family: var(--mono);
+    font-size: 12px;
     color: var(--fg-muted);
     overflow: hidden;
   }
 
   .pill:hover:not(:disabled) {
-    background: var(--bg-input);
-    border-color: var(--border-input);
+    background: color-mix(in srgb, var(--env) 18%, var(--bg-input));
+    border-color: color-mix(in srgb, var(--env) 45%, transparent);
   }
 
   .prod .pill {
@@ -221,10 +222,11 @@
     line-height: 18px;
     padding: 0 7px;
     border-radius: 5px;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
     font-size: 10px;
     font-weight: 700;
-    color: var(--env);
-    background: color-mix(in srgb, var(--env) 16%, transparent);
+    color: #fff;
+    background: var(--env);
   }
 
   .prod .tag {
@@ -249,7 +251,7 @@
 
   .name {
     color: var(--fg);
-    font-weight: 650;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

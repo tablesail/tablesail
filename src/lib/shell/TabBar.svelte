@@ -77,9 +77,9 @@
 
   .tab {
     position: relative;
-    flex: 1 1 0;
-    min-width: 110px;
-    max-width: 260px;
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 240px;
     display: flex;
     align-items: center;
     padding: 0 26px;

@@ -846,7 +846,7 @@
                     style:left="{colLeft[c]}px"
                     style:width="{effWidths[c]}px"
                   >
-                    {#if columns[c].family === 'enum' && typeof row[c] === 'string'}<span class="pill {statusTone(f.text)}">{f.text}</span>{:else}{f.text}{/if}
+                    {#if columns[c].family === 'enum' && typeof row[c] === 'string' && statusTone(f.text) !== 'neutral'}<span class="pill {statusTone(f.text)}">{f.text}</span>{:else}{f.text}{/if}
                   </div>
                 {:else}
                   <div class="cell ph" style:left="{colLeft[c]}px" style:width="{effWidths[c]}px"></div>
@@ -914,9 +914,9 @@
 <style>
   .grid {
     --g-line: var(--border);
-    --g-alt: transparent;
+    --g-alt: var(--bg-zebra);
     --g-sel: var(--selection);
-    --g-head: var(--bg-head);
+    --g-head: var(--bg);
     --g-inserted: rgb(46 160 67 / 0.2);
     --g-deleted: rgb(229 72 77 / 0.18);
     --g-edited: rgb(212 160 23 / 0.3);
@@ -928,7 +928,7 @@
     outline: none;
     background: var(--bg);
     color: var(--fg-cell);
-    font-size: 11.5px;
+    font-size: 12px;
     contain: layout paint;
   }
 
@@ -1012,8 +1012,8 @@
 
   .hname {
     font-weight: 600;
-    font-size: 11px;
-    color: var(--fg-muted);
+    font-size: 12px;
+    color: var(--fg);
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 0 1 auto;
@@ -1071,10 +1071,9 @@
     padding: 0 10px;
     text-align: right;
     font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: 11px;
     color: var(--fg-faint);
     font-variant-numeric: tabular-nums;
-    border-bottom: var(--hair) solid var(--g-line);
     overflow: hidden;
     cursor: pointer;
   }
@@ -1141,29 +1140,25 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    font-family: var(--mono);
     font-variant-numeric: tabular-nums;
-    border-right: var(--hair) solid var(--g-line);
-    border-bottom: var(--hair) solid var(--g-line);
   }
 
   .cell.num {
     text-align: right;
-    font-family: var(--mono);
-    font-size: 11px;
-    font-weight: 500;
-    color: var(--fg);
   }
 
   .pill {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    height: 18px;
-    padding: 0 7px;
-    border-radius: 5px;
-    font-size: 10px;
-    font-weight: 640;
-    line-height: 18px;
+    height: 17px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    font-size: 10.5px;
+    font-weight: 600;
+    line-height: 17px;
     vertical-align: middle;
     color: var(--fg-muted);
     background: color-mix(in srgb, var(--fg-muted) 16%, transparent);
@@ -1203,23 +1198,14 @@
   }
 
   .cell.null {
-    font-size: 10.5px;
-    letter-spacing: 0.04em;
+    font-size: 11px;
   }
 
   .cell.mono {
     font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--mono-fg);
   }
 
-  .cell.bool.yes {
-    color: var(--success);
-  }
 
-  .cell.bool.no {
-    color: var(--fg-muted);
-  }
 
   .cell.edited {
     background: var(--g-edited);
