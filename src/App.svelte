@@ -16,6 +16,9 @@
 
   theme.init()
 
+  // Browser preview only (src/dev/mockTauri.ts): stand-ins for the macOS window controls.
+  const fakeLights = import.meta.env.DEV && (window as unknown as { __TABLESOFT_MOCK__?: boolean }).__TABLESOFT_MOCK__ === true
+
   onMount(() => {
     void connections.load()
   })
@@ -35,6 +38,10 @@
 </script>
 
 <svelte:window onkeydowncapture={onKeydown} oncontextmenu={onContextMenu} />
+
+{#if fakeLights}
+  <div class="fake-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+{/if}
 
 <div class="app">
   {#if sessions.view === 'connections' || !sessions.active}
@@ -63,6 +70,31 @@
 <Toasts />
 
 <style>
+  .fake-lights {
+    position: fixed;
+    top: 17px;
+    left: 16px;
+    display: flex;
+    gap: 8px;
+    z-index: 1000;
+    pointer-events: none;
+  }
+
+  .fake-lights i {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #ff5f57;
+  }
+
+  .fake-lights i:nth-child(2) {
+    background: #febc2e;
+  }
+
+  .fake-lights i:nth-child(3) {
+    background: #28c840;
+  }
+
   .app {
     height: 100%;
   }

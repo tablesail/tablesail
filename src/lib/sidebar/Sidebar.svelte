@@ -35,24 +35,42 @@
     system: { icon: 'table', label: 'System', color: 'var(--kind-other)' },
   }
 
-  let groups = $derived.by(() => {
+  // Schemas in this database, public (or the engine's single "") first, system-ish last.
+  let schemaNames = $derived.by(() => {
+    const snap = entry.snapshot
+    if (!snap) return [] as string[]
+    const rank = (x: string) => (x === 'public' || x === '' ? 0 : /^(pg_|information_schema)/.test(x) ? 2 : 1)
+    return Object.keys(snap.schemas).sort((x, y) => rank(x) - rank(y) || x.localeCompare(y))
+  })
+
+  let chosenSchema = $state<string | null>(null)
+  let schema = $derived(
+    chosenSchema !== null && schemaNames.includes(chosenSchema) ? chosenSchema : (schemaNames[0] ?? ''),
+  )
+
+  const SECTIONS: { title: string; kinds: TableKind[] }[] = [
+    { title: 'Tables', kinds: ['table', 'virtual', 'foreignTable', 'system'] },
+    { title: 'Collections', kinds: ['collection', 'timeSeries'] },
+    { title: 'Views', kinds: ['view'] },
+    { title: 'Materialized views', kinds: ['materializedView'] },
+    { title: 'Sequences', kinds: ['sequence'] },
+  ]
+
+  let sections = $derived.by(() => {
     const snap = entry.snapshot
     if (!snap) return []
     const q = filter.trim().toLowerCase()
-    const out: { schema: string; tables: TableInfo[]; total: number }[] = []
-    for (const [schema, list] of Object.entries(snap.schemas)) {
-      const tables = q ? list.filter((t) => t.name.toLowerCase().includes(q)) : list
-      if (tables.length || (!q && list.length === 0)) out.push({ schema, tables, total: list.length })
-    }
-    out.sort((a, b) => {
-      // public first, system-ish schemas last
-      const rank = (s: string) => (s === 'public' || s === '' ? 0 : /^(pg_|information_schema)/.test(s) ? 2 : 1)
-      return rank(a.schema) - rank(b.schema) || a.schema.localeCompare(b.schema)
-    })
-    return out
+    // A search looks across every schema; otherwise show the selected one.
+    const pool = q ? Object.values(snap.schemas).flat() : (snap.schemas[schema] ?? [])
+    const list = q ? pool.filter((t) => t.name.toLowerCase().includes(q)) : pool
+    return SECTIONS.map((sec) => ({
+      title: sec.title,
+      tables: list.filter((t) => sec.kinds.includes(t.kind)).sort((x, y) => x.name.localeCompare(y.name)),
+    })).filter((sec) => sec.tables.length > 0)
   })
 
-  let showHeaders = $derived(groups.length > 1 || (groups.length === 1 && groups[0].schema !== ''))
+  let total = $derived(sections.reduce((n, sec) => n + sec.tables.length, 0))
+  let showSchemaInName = $derived(filter.trim() !== '' && schemaNames.length > 1)
 
   function ref(t: TableInfo): TableRef {
     return { database: t.database, schema: t.schema ?? null, name: t.name }
@@ -72,17 +90,8 @@
     tabs.openTable(session.sessionId, ref(t))
   }
 
-  function isCollapsed(schema: string): boolean {
-    if (filter.trim()) return false
-    return collapsed[schema] ?? (schema !== 'public' && schema !== '' && groups.length > 1 && schema !== defaultSchema())
-  }
-
-  function defaultSchema(): string {
-    return groups.some((g) => g.schema === 'public') ? 'public' : (groups[0]?.schema ?? '')
-  }
-
-  function toggle(schema: string) {
-    collapsed[schema] = !isCollapsed(schema)
+  function toggle(title: string) {
+    collapsed[title] = !collapsed[title]
   }
 
   function menuItems(t: TableInfo): MenuItem[] {
@@ -113,7 +122,56 @@
 </script>
 
 <div class="sidebar">
-  <div class="top">
+  <div class="search">
+    <span class="search-icon"><Icon name="search" size={12} /></span>
+    <input type="search" placeholder="Search for item…" bind:value={filter} spellcheck="false" />
+  </div>
+
+  <div class="tree" role="tree">
+    {#if !entry.snapshot && entry.loading}
+      <div class="note muted">Loading schema…</div>
+    {:else if !entry.snapshot && entry.error}
+      <div class="note error-text">{entry.error}</div>
+    {:else if entry.snapshot && total === 0}
+      <div class="note muted">{filter ? 'No matching items.' : 'Nothing here yet.'}</div>
+    {/if}
+
+    {#each sections as sec (sec.title)}
+      <button class="section" onclick={() => toggle(sec.title)} aria-expanded={!collapsed[sec.title]}>
+        {sec.title}
+        <span class="count">{sec.tables.length}</span>
+        <span class="chev" class:open={!collapsed[sec.title]}><Icon name="chevron-right" size={9} strokeWidth={2.2} /></span>
+      </button>
+      {#if !collapsed[sec.title]}
+        {#each sec.tables as t (t.schema + '\u0000' + t.name)}
+          {@const k = KIND[t.kind] ?? KIND.table}
+          <!-- svelte-ignore a11y_click_events_have_key_events -->
+          <div
+            class="row"
+            class:active={isActive(t)}
+            role="treeitem"
+            aria-selected={isActive(t)}
+            tabindex="-1"
+            title={t.comment ? `${t.name}\n${t.comment}` : t.name}
+            onclick={() => open(t)}
+            oncontextmenu={(e) => onContext(e, t)}
+          >
+            <span class="kind" style:color={k.color} title={k.label}><Icon name={k.icon} size={14} /></span>
+            <span class="name">{#if showSchemaInName && t.schema}<span class="muted">{t.schema}.</span>{/if}{t.name}</span>
+            {#if t.estimatedRows != null}
+              <span class="rows" title="≈ {formatCount(t.estimatedRows)} rows">{compactCount(t.estimatedRows)}</span>
+            {/if}
+          </div>
+        {/each}
+      {/if}
+    {/each}
+  </div>
+
+  {#if entry.error && entry.snapshot}
+    <div class="note error-text" title={entry.error}>Refresh failed: {entry.error}</div>
+  {/if}
+
+  <div class="bottom">
     <select
       value={database}
       onchange={(e) => sessions.setDatabase(session.sessionId, e.currentTarget.value)}
@@ -127,65 +185,14 @@
         <option value={database}>{database || '(default)'}</option>
       {/if}
     </select>
-    <button
-      class="icon refresh"
-      class:spin={entry.loading}
-      title={entry.loading ? 'Refreshing schema…' : 'Refresh schema'}
-      aria-label="Refresh schema"
-      onclick={() => sessions.refreshSchema(session.sessionId, database)}><Icon name="refresh" /></button
-    >
-  </div>
-  <div class="filter">
-    <span class="search-icon"><Icon name="search" size={12} /></span>
-    <input type="search" placeholder="Filter" bind:value={filter} spellcheck="false" />
-  </div>
-
-  <div class="tree" role="tree">
-    {#if !entry.snapshot && entry.loading}
-      <div class="note muted">Loading schema…</div>
-    {:else if !entry.snapshot && entry.error}
-      <div class="note error-text">{entry.error}</div>
-    {:else if groups.length === 0}
-      <div class="note muted">{filter ? 'No matching tables.' : 'No tables in this database.'}</div>
-    {/if}
-
-    {#each groups as g (g.schema)}
-      {#if showHeaders}
-        <button class="schema" onclick={() => toggle(g.schema)} aria-expanded={!isCollapsed(g.schema)}>
-          <span class="chev" class:open={!isCollapsed(g.schema)}><Icon name="chevron-right" size={10} strokeWidth={2} /></span>
-          {g.schema || '(default)'}
-          <span class="count">{g.tables.length}</span>
-        </button>
-      {/if}
-      {#if !showHeaders || !isCollapsed(g.schema)}
-        {#each g.tables as t (t.schema + '\u0000' + t.name)}
-          {@const k = KIND[t.kind] ?? KIND.table}
-          <!-- svelte-ignore a11y_click_events_have_key_events -->
-          <div
-            class="row"
-            class:indent={showHeaders}
-            class:active={isActive(t)}
-            role="treeitem"
-            aria-selected={isActive(t)}
-            tabindex="-1"
-            title={t.comment ? `${t.name}\n${t.comment}` : t.name}
-            onclick={() => open(t)}
-            oncontextmenu={(e) => onContext(e, t)}
-          >
-            <span class="kind" style:color={k.color} title={k.label}><Icon name={k.icon} size={14} /></span>
-            <span class="name">{t.name}</span>
-            {#if t.estimatedRows != null}
-              <span class="rows" title="≈ {formatCount(t.estimatedRows)} rows">{compactCount(t.estimatedRows)}</span>
-            {/if}
-          </div>
+    {#if schemaNames.length > 1 || (schemaNames.length === 1 && schemaNames[0] !== '')}
+      <select value={schema} onchange={(e) => (chosenSchema = e.currentTarget.value)} title="Schema" aria-label="Schema">
+        {#each schemaNames as name (name)}
+          <option value={name}>{name || '(default)'}</option>
         {/each}
-      {/if}
-    {/each}
+      </select>
+    {/if}
   </div>
-
-  {#if entry.error && entry.snapshot}
-    <div class="note error-text" title={entry.error}>Refresh failed: {entry.error}</div>
-  {/if}
 </div>
 
 {#if menu}
@@ -205,50 +212,26 @@
     min-width: 0;
   }
 
-  .top {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 8px 8px 4px;
-  }
-
-  .top select {
-    flex: 1;
-    font-weight: 500;
-  }
-
-  .refresh.spin :global(svg) {
-    animation: spin 0.9s linear infinite;
-  }
-
-  @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
-
-  .filter {
+  .search {
     position: relative;
-    padding: 4px 8px 8px;
+    padding: 8px 8px 6px;
   }
 
   .search-icon {
     position: absolute;
     left: 16px;
-    top: 11px;
+    top: 50%;
+    transform: translateY(-40%);
     color: var(--fg-faint);
     pointer-events: none;
   }
 
-  .filter input {
+  .search input {
     width: 100%;
-    padding-left: 25px;
-    background: var(--bg-active);
-    border-color: transparent;
-  }
-
-  .filter input:focus {
-    background: var(--bg-input);
+    min-height: 24px;
+    padding: 2px 8px 2px 25px;
+    font-size: 12px;
+    border-radius: 6px;
   }
 
   .tree {
@@ -263,59 +246,62 @@
     word-break: break-word;
   }
 
-  .schema {
+  .section {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 4px;
+    gap: 5px;
     width: 100%;
-    min-height: 24px;
-    text-align: left;
+    min-height: 22px;
+    height: 22px;
+    margin-top: 6px;
+    padding: 0 6px;
     background: transparent;
     border: none;
     box-shadow: none;
-    padding: 2px 6px;
-    margin-top: 4px;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+
+  .section:hover:not(:disabled) {
+    background: transparent;
     color: var(--fg-muted);
   }
 
-  .schema:hover:not(:disabled) {
-    background: transparent;
-    color: var(--fg);
+  .count {
+    font-weight: 500;
+    letter-spacing: 0;
   }
 
   .chev {
     display: inline-flex;
-    transition: transform 0.12s;
-    opacity: 0.8;
+    margin-left: auto;
+    opacity: 0;
+    transition:
+      transform 0.12s,
+      opacity 0.12s;
+  }
+
+  .section:hover .chev {
+    opacity: 1;
   }
 
   .chev.open {
     transform: rotate(90deg);
   }
 
-  .count {
-    margin-left: auto;
-    font-weight: 400;
-    color: var(--fg-faint);
-    font-variant-numeric: tabular-nums;
-  }
-
   .row {
     display: flex;
     align-items: center;
-    gap: 7px;
-    height: 24px;
-    padding: 0 8px;
-    border-radius: 6px;
+    gap: 6px;
+    height: 22px;
+    padding: 0 6px 0 8px;
+    border-radius: 5px;
     white-space: nowrap;
-  }
-
-  .row.indent {
-    padding-left: 18px;
+    font-size: 12.5px;
   }
 
   .row:hover {
@@ -323,11 +309,15 @@
   }
 
   .row.active {
-    background: var(--selection);
+    background: var(--accent-solid);
+    color: #fff;
   }
 
-  .row.active .name {
-    font-weight: 500;
+  .row.active .kind,
+  .row.active .rows,
+  .row.active .muted {
+    color: inherit !important;
+    opacity: 0.85;
   }
 
   .kind {
@@ -343,8 +333,34 @@
 
   .rows {
     flex: none;
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--fg-faint);
     font-variant-numeric: tabular-nums;
+  }
+
+  .bottom {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 8px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-chrome);
+    flex: none;
+  }
+
+  .bottom select {
+    flex: 1;
+    min-width: 0;
+    min-height: 22px;
+    padding: 1px 20px 1px 7px;
+    font-size: 12px;
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .bottom select:hover {
+    background-color: var(--bg-hover);
   }
 </style>

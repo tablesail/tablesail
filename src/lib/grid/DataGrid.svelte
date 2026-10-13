@@ -911,7 +911,7 @@
     --g-line: var(--border);
     --g-alt: var(--bg-alt);
     --g-sel: var(--selection, rgb(10 102 216 / 0.16));
-    --g-head: var(--bg-chrome);
+    --g-head: color-mix(in srgb, var(--bg-chrome) 55%, var(--bg));
     --g-inserted: rgb(46 160 67 / 0.2);
     --g-deleted: rgb(229 72 77 / 0.18);
     --g-edited: rgb(212 160 23 / 0.3);
@@ -1006,7 +1006,7 @@
   }
 
   .hname {
-    font-weight: 600;
+    font-weight: 500;
     color: var(--fg);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1047,7 +1047,7 @@
     bottom: 0;
     z-index: 2;
     overflow: hidden;
-    background: var(--g-head);
+    background: var(--bg);
     border-right: var(--hair) solid var(--g-line);
   }
 

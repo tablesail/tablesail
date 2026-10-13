@@ -164,7 +164,7 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<Modal title={initial ? 'Edit connection' : 'New connection'} {onClose} width="560px" dismissable={!saving}>
+<Modal title={initial?.id ? 'Edit connection' : 'New connection'} {onClose} width="560px" dismissable={!saving}>
   <div class="form">
     <div class="engines" role="radiogroup" aria-label="Engine">
       {#each engines as eng (eng)}

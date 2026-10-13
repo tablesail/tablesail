@@ -19,7 +19,13 @@
         "fullscreen": false,
         "label": "main",
         "minWidth": 800,
-        "minHeight": 500
+        "minHeight": 500,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 16
+        }
       }
     ],
     "security": {

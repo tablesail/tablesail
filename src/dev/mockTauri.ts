@@ -338,4 +338,6 @@ let callbackId = 1
   convertFileSrc: (p: string) => p,
   metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } },
 }
+// Lets the UI draw stand-in macOS traffic lights, so browser previews match the real window.
+;(window as any).__TABLESOFT_MOCK__ = true
 console.info('[mock] Tauri runtime mocked with sample data')

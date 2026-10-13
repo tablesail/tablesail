@@ -15,6 +15,8 @@
   --accent: #0a66d8;
   --accent-fg: #ffffff;
   --accent-soft: rgb(10 102 216 / 0.1);
+  /* Solid selection (selected sidebar item, selected connection): always white text on it. */
+  --accent-solid: #0a66d8;
   --selection: rgb(10 102 216 / 0.14);
   --danger: #d93025;
   --success: #1e8e3e;
@@ -63,6 +65,7 @@
   --accent: #4c9aff;
   --accent-fg: #0b1220;
   --accent-soft: rgb(76 154 255 / 0.14);
+  --accent-solid: #2b6fd6;
   --selection: rgb(76 154 255 / 0.22);
   --danger: #f2665c;
   --success: #52c26f;
@@ -102,6 +105,8 @@
     --accent: #4c9aff;
     --accent-fg: #0b1220;
     --accent-soft: rgb(76 154 255 / 0.14);
+    --accent-solid: #2b6fd6;
+  --accent-solid: #2b6fd6;
     --selection: rgb(76 154 255 / 0.22);
     --danger: #f2665c;
     --success: #52c26f;

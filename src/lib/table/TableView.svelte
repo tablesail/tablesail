@@ -909,48 +909,6 @@
 <svelte:window onkeydown={onWindowKey} />
 
 <div class="tv">
-  <div class="toolbar">
-    <div class="seg" role="tablist">
-      <button role="tab" aria-selected={tab === 'data'} class:on={tab === 'data'} onclick={() => (tab = 'data')}>Data</button>
-      <button role="tab" aria-selected={tab === 'structure'} class:on={tab === 'structure'} onclick={() => (tab = 'structure')}>Structure</button>
-    </div>
-
-    {#if tab === 'data'}
-      <span class="sep"></span>
-      <button class="icon" title="Refresh (⌘R)" aria-label="Refresh" onclick={refresh}><Icon name="refresh" /></button>
-      <button class="tool" class:on={showFilters || appliedCount > 0} title="Filter (⌘F)" onclick={toggleFilters}>
-        <Icon name="filter" size={13} /> Filter{#if appliedCount > 0}<span class="count">{appliedCount}</span>{/if}
-      </button>
-      <span class="sep"></span>
-      <button class="tool" disabled={!editable} title="Add a row" onclick={addRow}><Icon name="plus" size={13} /> Row</button>
-      <button
-        class="icon"
-        disabled={!editable || !selection}
-        title="Delete the selected rows (Delete)"
-        aria-label="Delete selected rows"
-        onclick={deleteSelected}><Icon name="trash" /></button
-      >
-    {/if}
-
-    <span class="grow"></span>
-
-    {#if tab === 'data' && !store.isEmpty}
-      <div class="changes">
-        <span class="pending-dot"></span>
-        <span class="pending-label">{store.pending} change{store.pending === 1 ? '' : 's'}</span>
-        <button class="ghost" onclick={previewSql}>Preview SQL</button>
-        <button class="ghost" disabled={committing} onclick={discard}>Discard</button>
-        <button class="primary" disabled={committing || !structure} title="Commit (⌘S)" onclick={requestCommit}>
-          {committing ? 'Committing…' : 'Commit'}
-        </button>
-      </div>
-      <span class="sep"></span>
-    {/if}
-
-    <button class="icon" disabled={!onExport} title="Export…" aria-label="Export" onclick={() => onExport?.(request)}><Icon name="export" /></button>
-    <button class="icon" disabled={importDisabled} title="Import CSV…" aria-label="Import CSV" onclick={() => onImport?.(table)}><Icon name="import" /></button>
-  </div>
-
   {#if readOnlyReason && tab === 'data'}
     <div class="banner info"><Icon name="lock" size={12} /> {readOnlyReason}</div>
   {/if}
@@ -1026,18 +984,53 @@
     {/if}
   </div>
 
-  <div class="status">
+  <div class="bottombar">
+    <div class="seg" role="tablist">
+      <button role="tab" aria-selected={tab === 'data'} class:on={tab === 'data'} onclick={() => (tab = 'data')}>Data</button>
+      <button role="tab" aria-selected={tab === 'structure'} class:on={tab === 'structure'} onclick={() => (tab = 'structure')}>Structure</button>
+    </div>
+
     {#if tab === 'data'}
-      <span>{countText}{store.insertCount > 0 ? ` + ${store.insertCount} new` : ''}</span>
-      {#if lastMs !== null}<span class="dim">{lastMs < 1 ? '<1' : Math.round(lastMs)} ms</span>{/if}
-      {#if selectionText}<span class="dim">{selectionText}</span>{/if}
-      {#if pendingText}<span class="pending">{pendingText}</span>{/if}
-      {#if flash}<span class:err={flash.error} class="flash">{flash.text}</span>{/if}
-      <span class="sql" title={lastQuery}>{lastQuery}</span>
-    {:else}
-      <span>{structure ? `${structure.columns.length} columns` : ''}</span>
-      {#if flash}<span class:err={flash.error} class="flash">{flash.text}</span>{/if}
+      <button class="bb" disabled={!editable} title="Add a row" onclick={addRow}><Icon name="plus" size={12} strokeWidth={1.8} /> Row</button>
+      <button
+        class="bb icon-only"
+        disabled={!editable || !selection}
+        title="Delete the selected rows (Delete)"
+        aria-label="Delete selected rows"
+        onclick={deleteSelected}><Icon name="trash" size={13} /></button
+      >
     {/if}
+
+    <div class="info" title={tab === 'data' ? lastQuery : ''}>
+      {#if tab === 'data'}
+        <span>{countText}{store.insertCount > 0 ? ` + ${store.insertCount} new` : ''}</span>
+        {#if lastMs !== null}<span class="dim">{lastMs < 1 ? '<1' : Math.round(lastMs)} ms</span>{/if}
+        {#if selectionText}<span class="dim">{selectionText}</span>{/if}
+      {:else}
+        <span>{structure ? `${structure.columns.length} columns` : ''}</span>
+      {/if}
+      {#if flash}<span class:err={flash.error} class="flash">{flash.text}</span>{/if}
+    </div>
+
+    {#if tab === 'data' && !store.isEmpty}
+      <div class="changes">
+        <span class="pending-label">{store.pending} change{store.pending === 1 ? '' : 's'}</span>
+        <button class="bb" onclick={previewSql}>Preview</button>
+        <button class="bb" disabled={committing} onclick={discard}>Discard</button>
+        <button class="primary small" disabled={committing || !structure} title="Commit (⌘S)" onclick={requestCommit}>
+          {committing ? 'Committing…' : 'Commit'}
+        </button>
+      </div>
+    {/if}
+
+    {#if tab === 'data'}
+      <button class="bb" class:on={showFilters || appliedCount > 0} title="Filter (⌘F)" onclick={toggleFilters}>
+        <Icon name="filter" size={12} /> Filters{#if appliedCount > 0}<span class="count">{appliedCount}</span>{/if}
+      </button>
+      <button class="bb icon-only" title="Refresh (⌘R)" aria-label="Refresh" onclick={refresh}><Icon name="refresh" size={13} /></button>
+    {/if}
+    <button class="bb icon-only" disabled={!onExport} title="Export…" aria-label="Export" onclick={() => onExport?.(request)}><Icon name="export" size={13} /></button>
+    <button class="bb icon-only" disabled={importDisabled} title="Import CSV…" aria-label="Import CSV" onclick={() => onImport?.(table)}><Icon name="import" size={13} /></button>
   </div>
 </div>
 
@@ -1162,77 +1155,6 @@
     background: var(--bg);
   }
 
-  .toolbar {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    height: 40px;
-    padding: 0 8px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg);
-    flex: 0 0 auto;
-  }
-
-  .tool {
-    background: transparent;
-    border-color: transparent;
-    box-shadow: none;
-    color: var(--fg-muted);
-    padding: 3px 8px;
-  }
-
-  .tool:hover:not(:disabled) {
-    color: var(--fg);
-  }
-
-  .tool.on {
-    color: var(--accent);
-    background: var(--accent-soft);
-  }
-
-  .count {
-    min-width: 16px;
-    height: 16px;
-    padding: 0 4px;
-    border-radius: 8px;
-    font-size: 10px;
-    font-weight: 600;
-    line-height: 16px;
-    text-align: center;
-    background: var(--accent);
-    color: var(--accent-fg);
-  }
-
-  .sep {
-    width: 1px;
-    height: 18px;
-    margin: 0 6px;
-    background: var(--border);
-  }
-
-  .changes {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 2px 2px 10px;
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--warning) 10%, transparent);
-  }
-
-  .pending-dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--warning);
-  }
-
-  .pending-label {
-    margin-right: 4px;
-    font-weight: 500;
-    color: var(--warning);
-    font-variant-numeric: tabular-nums;
-  }
-
   .grow {
     flex: 1;
   }
@@ -1294,48 +1216,114 @@
     justify-content: center;
   }
 
-  .status {
+  .bottombar {
     display: flex;
     align-items: center;
-    gap: 14px;
-    height: 26px;
-    padding: 0 10px;
-    border-top: 1px solid var(--border);
+    gap: 4px;
+    height: 32px;
+    padding: 0 8px;
+    border-top: 1px solid var(--border-strong);
     background: var(--bg-chrome);
-    color: var(--fg);
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
+    font-size: 12px;
     flex: 0 0 auto;
     white-space: nowrap;
   }
 
-  .status .dim {
+  .bottombar .seg {
+    margin-right: 6px;
+  }
+
+  .bottombar .seg button {
+    min-height: 20px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .bb {
+    gap: 4px;
+    min-height: 22px;
+    height: 22px;
+    padding: 0 7px;
+    font-size: 12px;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
     color: var(--fg-muted);
   }
 
-  .status .pending {
-    color: var(--warning);
-    font-weight: 600;
+  .bb.icon-only {
+    width: 24px;
+    padding: 0;
   }
 
-  .status .flash {
+  .bb:hover:not(:disabled) {
+    background: var(--bg-active);
+    color: var(--fg);
+  }
+
+  .bb.on {
+    color: var(--accent);
+  }
+
+  .count {
+    min-width: 15px;
+    height: 15px;
+    padding: 0 4px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 15px;
+    text-align: center;
+    background: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  .info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    justify-content: center;
+    gap: 12px;
+    overflow: hidden;
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .info .dim {
+    color: var(--fg-muted);
+  }
+
+  .info .flash {
     color: var(--success);
   }
 
-  .status .flash.err {
+  .info .flash.err {
     color: var(--danger);
   }
 
-  .status .sql {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    text-align: right;
-    font-family: var(--mono);
-    color: var(--fg-muted);
-    user-select: text;
-    -webkit-user-select: text;
+  .changes {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-right: 6px;
+    padding: 0 2px 0 9px;
+    height: 24px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--warning) 13%, transparent);
+  }
+
+  .pending-label {
+    margin-right: 4px;
+    font-weight: 600;
+    color: var(--warning);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .primary.small {
+    min-height: 20px;
+    height: 20px;
+    padding: 0 9px;
+    font-size: 12px;
   }
 
   .sql-block {

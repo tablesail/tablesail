@@ -35,17 +35,17 @@
       onmousedown={(e) => e.button === 1 && e.preventDefault()}
       onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && tabs.select(t.id)}
     >
-      <span class="kind"><Icon name={t.kind === 'table' ? 'table' : 'query'} size={13} /></span>
-      <span class="label">{t.title}</span>
       <button
         class="close icon"
         aria-label="Close tab"
         tabindex="-1"
+        onmousedown={(e) => e.preventDefault()}
         onclick={(e) => {
           e.stopPropagation()
           tabs.close(t.id)
-        }}><Icon name="close" size={11} strokeWidth={1.8} /></button
+        }}><Icon name="close" size={10} strokeWidth={1.8} /></button
       >
+      <span class="label"><span class="kind"><Icon name={t.kind === 'table' ? 'table' : 'query'} size={12} /></span><span class="t">{t.title}</span></span>
     </div>
   {/each}
   <button
@@ -62,15 +62,13 @@
 <style>
   .bar {
     display: flex;
-    align-items: flex-end;
-    gap: 1px;
-    padding: 0 6px;
+    align-items: stretch;
     background: var(--bg-chrome);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border-strong);
     overflow-x: auto;
     overflow-y: hidden;
     flex: none;
-    height: 34px;
+    height: 30px;
   }
 
   .bar::-webkit-scrollbar {
@@ -79,44 +77,47 @@
 
   .tab {
     position: relative;
+    flex: 1 1 0;
+    min-width: 110px;
+    max-width: 260px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    height: 29px;
-    padding: 0 4px 0 10px;
-    min-width: 90px;
-    max-width: 210px;
-    border-radius: 7px 7px 0 0;
+    padding: 0 26px;
+    border-right: 1px solid var(--border-strong);
     color: var(--fg-muted);
-    flex: none;
-    margin-bottom: -1px;
-    border: 1px solid transparent;
-    border-bottom: none;
+    font-size: 12px;
+    background: color-mix(in srgb, var(--bg-active) 60%, transparent);
   }
 
   .tab:hover:not(.active) {
-    background: var(--bg-hover);
-  }
-
-  .tab:not(.active):not(:hover) + .tab:not(.active):not(:hover)::before {
-    content: '';
-    position: absolute;
-    left: -1px;
-    top: 8px;
-    bottom: 8px;
-    width: 1px;
-    background: var(--border-strong);
+    background: var(--bg-active);
   }
 
   .tab.active {
     background: var(--bg);
     color: var(--fg);
-    border-color: var(--border);
-    height: 30px;
+  }
+
+  .label {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .t {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .kind {
-    opacity: 0.75;
+    display: inline-flex;
+    flex: none;
+    opacity: 0.7;
   }
 
   .active .kind {
@@ -124,24 +125,20 @@
     opacity: 1;
   }
 
-  .label {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
   .close {
-    width: 18px;
-    min-width: 18px;
-    min-height: 18px;
-    height: 18px;
+    position: absolute;
+    left: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 17px;
+    min-width: 17px;
+    min-height: 17px;
+    height: 17px;
     border-radius: 4px;
     opacity: 0;
   }
 
-  .tab:hover .close,
-  .tab.active .close {
+  .tab:hover .close {
     opacity: 1;
   }
 
@@ -150,12 +147,13 @@
   }
 
   .add {
+    flex: none;
     align-self: center;
-    margin-left: 2px;
+    margin: 0 4px;
     border-radius: 6px;
   }
 
   .add:hover:not(:disabled) {
-    background: var(--bg-hover);
+    background: var(--bg-active);
   }
 </style>

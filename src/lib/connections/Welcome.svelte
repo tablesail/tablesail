@@ -13,7 +13,9 @@
   import { ui } from '../stores/ui.svelte'
   import type { ConnectionConfig, EnvTag, Secrets } from '../types'
   import { ENGINE_LABEL, ENV_TAGS, describeConnection, envColor } from '../util/env'
-  import { modLabel } from '../util/format'
+  import { isMac, modLabel } from '../util/format'
+  import { api } from '../api'
+  import { newConfig } from '../util/env'
 
   let search = $state('')
   let selectedId = $state<string | null>(null)
@@ -47,10 +49,15 @@
 
   let flat = $derived(groups.flatMap((g) => g.items))
 
+  let version = $state('')
+
   onMount(() => {
     if (!connections.loaded) void connections.load()
     searchEl?.focus()
+    api.appInfo().then((i) => (version = i.version), () => {})
   })
+
+  const envLabel: Record<EnvTag, string> = { local: 'local', development: 'dev', staging: 'staging', production: 'production' }
 
   $effect(() => {
     if (!flat.some((c) => c.id === selectedId)) selectedId = flat[0]?.id ?? null
@@ -160,30 +167,37 @@
 <svelte:window onkeydown={onKeydown} />
 
 <div class="welcome">
-  <div class="panel">
-    <header>
-      <div class="brand">
-        <span class="logo"><Icon name="database" size={18} strokeWidth={1.6} /></span>
-        <div>
-          <h1>TableSoft</h1>
-          <span class="muted">Free, open-source database client</span>
-        </div>
-      </div>
-      <div class="actions">
-        <div class="search">
-          <span class="search-icon"><Icon name="search" size={12} /></span>
-          <input
-            type="search"
-            placeholder="Search"
-            bind:value={search}
-            bind:this={searchEl}
-            spellcheck="false"
-          />
-        </div>
-        <button class="primary" onclick={() => (form = { initial: null })}><Icon name="plus" size={13} strokeWidth={1.8} /> New</button>
-        <button class="icon" title="Keyboard shortcuts ({modLabel}/)" aria-label="Keyboard shortcuts" onclick={() => (ui.shortcutsHelp = true)}>?</button>
-      </div>
-    </header>
+  <aside class="intro" data-tauri-drag-region class:mac={isMac}>
+    <div class="hero" data-tauri-drag-region>
+      <span class="logo"><Icon name="database" size={34} strokeWidth={1.3} /></span>
+      <h1>TableSoft</h1>
+      <p class="muted">{version ? `Version ${version}` : '\u00a0'}</p>
+    </div>
+    <div class="actions">
+      <button class="action" onclick={() => (form = { initial: null })}>
+        <Icon name="plus" size={14} /> Create a new connection…
+      </button>
+      <button class="action" onclick={() => (form = { initial: { ...newConfig('sqlite'), name: '' } })}>
+        <Icon name="database" size={14} /> Open a SQLite file…
+      </button>
+      <button class="action" onclick={() => (ui.shortcutsHelp = true)}>
+        <Icon name="key" size={14} /> Keyboard shortcuts
+      </button>
+    </div>
+    <p class="foot muted">Free and open source · MIT</p>
+  </aside>
+
+  <section class="conns">
+    <div class="search" data-tauri-drag-region>
+      <span class="search-icon"><Icon name="search" size={13} /></span>
+      <input
+        type="search"
+        placeholder="Search for connection…"
+        bind:value={search}
+        bind:this={searchEl}
+        spellcheck="false"
+      />
+    </div>
 
     <div class="list">
       {#if connections.error}
@@ -199,59 +213,50 @@
         <div class="empty muted">No connections match “{search}”.</div>
       {/if}
 
-      {#each groups as group (group.env)}
-        <div class="group-head" style:--env="var(--env-{group.env})">
-          <span class="dot"></span>
-          {group.env}
-          <span class="count">{group.items.length}</span>
-        </div>
-        {#each group.items as c (c.id)}
-          {@const live = sessions.byConnection(c.id)}
-          <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-          <div
-            class="item"
-            class:selected={c.id === selectedId}
-            data-conn={c.id}
-            role="option"
-            aria-selected={c.id === selectedId}
-            tabindex="-1"
-            onclick={() => (selectedId = c.id)}
-            ondblclick={() => openConnection(c)}
-            oncontextmenu={(e) => showMenu(e, c)}
-          >
-            <span class="tile">
-              <EngineBadge engine={c.engine} size={32} />
-              <span class="env-dot" style:background={envColor(c)}></span>
-            </span>
-            <div class="main">
-              <div class="name">
-                {c.name}
-                {#if c.readOnly}<span class="tag"><Icon name="lock" size={9} /> read-only</span>{/if}
-                {#if live}<span class="tag live">connected</span>{/if}
-              </div>
-              <div class="sub">{ENGINE_LABEL[c.engine]} · {describeConnection(c)}</div>
-              {#if openError?.id === c.id}
-                <div class="err error-text">{openError.message}</div>
-              {/if}
+      {#each flat as c (c.id)}
+        {@const live = sessions.byConnection(c.id)}
+        <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+        <div
+          class="item"
+          class:selected={c.id === selectedId}
+          data-conn={c.id}
+          role="option"
+          aria-selected={c.id === selectedId}
+          tabindex="-1"
+          onclick={() => (selectedId = c.id)}
+          ondblclick={() => openConnection(c)}
+          oncontextmenu={(e) => showMenu(e, c)}
+        >
+          <EngineBadge engine={c.engine} size={36} />
+          <div class="main">
+            <div class="name">
+              <span class="n">{c.name}</span>
+              <span class="tag" style:--env={envColor(c)}>{envLabel[c.env]}</span>
+              {#if c.readOnly}<span class="lock" title="Read-only"><Icon name="lock" size={11} /></span>{/if}
+              {#if live}<span class="live" title="Connected"></span>{/if}
             </div>
-            {#if opening === c.id}<span class="muted connecting">Connecting…</span>{/if}
-            <button
-              class="icon more"
-              aria-label="Actions"
-              onclick={(e) => {
-                e.stopPropagation()
-                showMenu(e, c)
-              }}><Icon name="more" size={16} /></button
-            >
+            <div class="sub">{describeConnection(c) || ENGINE_LABEL[c.engine]}</div>
+            {#if openError?.id === c.id}
+              <div class="err error-text">{openError.message}</div>
+            {/if}
           </div>
-        {/each}
+          {#if opening === c.id}<span class="connecting">Connecting…</span>{/if}
+          <button
+            class="icon more"
+            aria-label="Actions"
+            onclick={(e) => {
+              e.stopPropagation()
+              showMenu(e, c)
+            }}><Icon name="more" size={16} /></button
+          >
+        </div>
       {/each}
     </div>
 
     <footer class="muted">
-      <span><kbd>↑</kbd> <kbd>↓</kbd> select · <kbd>Enter</kbd> open · <kbd>{modLabel}</kbd> <kbd>N</kbd> new</span>
+      <span><kbd>↑</kbd><kbd>↓</kbd> select · <kbd>↵</kbd> open · <kbd>{modLabel}</kbd><kbd>N</kbd> new</span>
     </footer>
-  </div>
+  </section>
 </div>
 
 {#if form}
@@ -286,134 +291,137 @@
 <style>
   .welcome {
     height: 100%;
-    display: flex;
-    justify-content: center;
-    background: var(--bg-sidebar);
-    padding: 8vh 16px 16px;
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    background: var(--bg);
   }
 
-  .panel {
-    width: 720px;
-    max-width: 100%;
+  .intro {
     display: flex;
     flex-direction: column;
-    background: var(--bg);
-    border-radius: 12px;
-    box-shadow: var(--shadow-lg);
-    overflow: hidden;
-    max-height: 100%;
+    padding: 40px 20px 16px;
+    background: var(--bg-chrome);
+    border-right: 1px solid var(--border-strong);
   }
 
-  header {
+  .hero {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 16px 16px 14px 18px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 11px;
+    gap: 4px;
+    margin: 24px 0 28px;
   }
 
   .logo {
-    width: 34px;
-    height: 34px;
-    border-radius: 9px;
+    width: 84px;
+    height: 84px;
+    border-radius: 20px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     color: #fff;
-    background: linear-gradient(145deg, #3d8bfd, #0a58ca);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.25);
+    background: linear-gradient(160deg, #4f9bff 0%, #1462d6 60%, #0d47a8 100%);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.3),
+      0 8px 20px rgb(13 71 168 / 0.3);
+    margin-bottom: 10px;
   }
 
   h1 {
-    font-size: 15px;
-    font-weight: 700;
     margin: 0;
-    line-height: 1.2;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
   }
 
-  .brand .muted {
+  .hero p {
+    margin: 0;
     font-size: 12px;
   }
 
   .actions {
     display: flex;
-    gap: 6px;
-    align-items: center;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .action {
+    justify-content: flex-start;
+    gap: 9px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 7px;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+    color: var(--fg);
+  }
+
+  .action :global(svg) {
+    color: var(--accent);
+  }
+
+  .action:hover:not(:disabled) {
+    background: var(--bg-active);
+  }
+
+  .foot {
+    margin: auto 0 0;
+    text-align: center;
+    font-size: 11px;
+  }
+
+  .conns {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
   }
 
   .search {
     position: relative;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
   }
 
   .search-icon {
     position: absolute;
-    left: 9px;
+    left: 24px;
     top: 50%;
-    transform: translateY(-50%);
+    transform: translateY(-48%);
     color: var(--fg-faint);
     pointer-events: none;
   }
 
   .search input {
-    width: 200px;
-    padding-left: 26px;
-    background: var(--bg-active);
-    border-color: transparent;
-  }
-
-  .search input:focus {
-    background: var(--bg-input);
+    width: 100%;
+    height: 30px;
+    padding-left: 30px;
+    border-radius: 7px;
   }
 
   .list {
     flex: 1;
     overflow: auto;
-    padding: 4px 10px 12px;
+    padding: 6px 8px;
     min-height: 120px;
   }
 
   .empty {
-    padding: 40px 16px;
+    padding: 48px 16px;
     text-align: center;
-  }
-
-  .group-head {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    padding: 14px 10px 6px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fg-muted);
-  }
-
-  .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--env);
-  }
-
-  .count {
-    color: var(--fg-faint);
-    font-weight: 400;
   }
 
   .item {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 8px 8px 8px 10px;
+    padding: 8px 10px;
     border-radius: 8px;
+  }
+
+  .item + .item {
+    margin-top: 1px;
   }
 
   .item:hover {
@@ -421,27 +429,21 @@
   }
 
   .item.selected {
-    background: var(--selection);
+    background: var(--accent-solid);
+    color: #fff;
   }
 
-  .tile {
-    position: relative;
-    display: inline-flex;
+  .item.selected .sub,
+  .item.selected .lock,
+  .item.selected .more,
+  .item.selected .connecting {
+    color: inherit;
+    opacity: 0.85;
   }
 
-  .env-dot {
-    position: absolute;
-    right: -3px;
-    bottom: -3px;
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    border: 2px solid var(--bg);
-  }
-
-  .item:hover .env-dot,
-  .item.selected .env-dot {
-    border-color: transparent;
+  .item.selected .tag {
+    background: rgb(255 255 255 / 0.22);
+    color: #fff;
   }
 
   .main {
@@ -450,14 +452,45 @@
   }
 
   .name {
-    font-weight: 600;
     display: flex;
-    gap: 6px;
+    gap: 7px;
     align-items: center;
+    font-weight: 600;
+  }
+
+  .n {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tag {
+    flex: none;
+    height: 16px;
+    line-height: 16px;
+    padding: 0 6px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--env);
+    background: color-mix(in srgb, var(--env) 15%, transparent);
+  }
+
+  .lock {
+    display: inline-flex;
+    color: var(--warning);
+  }
+
+  .live {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--success) 25%, transparent);
   }
 
   .sub {
-    margin-top: 1px;
+    margin-top: 2px;
     font-size: 12px;
     color: var(--fg-muted);
     white-space: nowrap;
@@ -470,26 +503,9 @@
     white-space: pre-wrap;
   }
 
-  .tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    height: 16px;
-    font-size: 10px;
-    font-weight: 500;
-    padding: 0 6px;
-    border-radius: 4px;
-    background: var(--bg-active);
-    color: var(--fg-muted);
-  }
-
-  .tag.live {
-    color: var(--success);
-    background: color-mix(in srgb, var(--success) 14%, transparent);
-  }
-
   .connecting {
     font-size: 12px;
+    color: var(--fg-muted);
   }
 
   .more {
@@ -502,9 +518,12 @@
   }
 
   footer {
-    padding: 9px 18px;
+    padding: 8px 16px;
     border-top: 1px solid var(--border);
-    background: var(--bg-chrome);
     font-size: 11px;
+  }
+
+  footer kbd + kbd {
+    margin-left: 2px;
   }
 </style>
