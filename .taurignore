@@ -1,0 +1,7 @@
+# Files that should not restart `tauri dev` when they change (tests, test output).
+tests/
+**/tests/
+e2e/
+test-results/
+playwright-report/
+*.test.ts
