@@ -6,7 +6,7 @@
     engines: string[]
   }
 
-  const info: Promise<CoreInfo> = invoke('core_info')
+  const info: Promise<CoreInfo> = invoke('app_info')
 </script>
 
 <main>

@@ -22,6 +22,16 @@ sqlx = { version = "0.9", default-features = false, features = [
   "sqlite-bundled",
 ] }
 mongodb = "3.9"
+async-trait = "0.1"
+base64 = "0.23"
+hex = "0.4"
+csv = "1.4"
+json5 = "1.3"
+regex = "1.13"
+tokio-util = "0.7"
+uuid = { version = "1", features = ["v4", "serde"] }
+russh = { version = "0.64", default-features = false, features = ["ring", "rsa", "flate2"] }
+keyring = "4.2"
 
 [profile.dev]
 # Line tables keep backtraces useful at a fraction of full debug info's disk cost.

@@ -12,7 +12,7 @@ A desktop database client built as Svelte UI → Tauri → Rust core, shipping a
 | Shell | Tauri (OS web view, no bundled browser) |
 | Core | Rust: sqlx (MySQL/MariaDB, PostgreSQL, SQLite), mongodb, russh, keyring, tokio |
 | Engines in v1 | MySQL/MariaDB, PostgreSQL, SQLite, MongoDB |
-| Differentiator | Laravel-aware: connections from .env, migration status, model/factory/migration generation |
+| Differentiator | Free and open source, faster than TablePlus on the hard targets below. Laravel-aware features deferred to after v1.0 (decided Oct 13, 2026) |
 | Licence | Open source |
 | Who builds | Claude writes all code; Mr Hawk installs the toolchain, runs, reviews and packages |
 
@@ -67,13 +67,13 @@ Milestone: usable daily on SQL databases.
 - Streaming CSV/JSON/SQL export straight from the cursor to disk; CSV import
 - Keyboard shortcuts, tabs, dark mode, high-DPI; filters and sorting pushed down to SQL
 
-## Phase 7 — MongoDB (2 sessions)
+## Phase 7 — MongoDB (2 sessions) — v1.0
 
 - Official Rust driver behind the same Driver trait: collections as tables, sampled schema
 - Document viewer and filter editor
 - BSON types kept typed end to end: ObjectId, Decimal128, Int64, Date, Binary
 
-## Phase 8 — Laravel features (2 sessions) — v1.0
+## Phase 8 — Laravel features — deferred until after v1.0
 
 The features TablePlus will never build, aimed at the Laravel community.
 
@@ -112,7 +112,7 @@ Benchmarked against TablePlus at every milestone, not at the end.
 
 ## Timeline and working rules
 
-Roughly 15–18 sessions to v1.0: v0.1 public beta after Phase 6, v1.0 after Phase 8.
+v0.1 public beta after Phase 6, v1.0 after Phase 7. On Oct 13, 2026 Mr Hawk chose to write all phases' code first (one workflow of parallel agents against a fixed contract) and test afterwards; rules 1, 2 and 4 apply from the debugging pass onwards.
 
 1. One milestone per session; every session ends with a working app, never a half-wired state
 2. The test suite against all four engines passes before a milestone is called done
