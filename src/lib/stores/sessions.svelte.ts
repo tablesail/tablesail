@@ -54,6 +54,7 @@ class SessionsStore {
       this.currentDb[info.sessionId] = info.databases.includes(wanted) ? wanted : (info.databases[0] ?? wanted)
     }
     this.activate(info.sessionId)
+    tabs.restore(info.sessionId, info.config.id)
     void this.ensureSchema(info.sessionId, this.currentDb[info.sessionId])
     return info
   }
