@@ -3,6 +3,7 @@
 -->
 <script lang="ts">
   import type { TableStructure } from '../types'
+  import { highlightSql } from '../util/sqlHighlight'
 
   interface Props {
     structure: TableStructure
@@ -126,7 +127,7 @@
       {/if}
     </h3>
     {#if structure.ddl}
-      <pre class="ddl">{structure.ddl}</pre>
+      <pre class="ddl">{@html highlightSql(structure.ddl)}</pre>
     {:else}
       <p class="muted none">This engine does not provide a DDL statement for the table.</p>
     {/if}
@@ -219,6 +220,22 @@
 
   .none {
     margin: 0;
+  }
+
+  .ddl :global(.k) {
+    color: var(--syn-keyword);
+  }
+
+  .ddl :global(.s) {
+    color: var(--syn-string);
+  }
+
+  .ddl :global(.n) {
+    color: var(--syn-number);
+  }
+
+  .ddl :global(.c) {
+    color: var(--syn-comment);
   }
 
   .ddl {
