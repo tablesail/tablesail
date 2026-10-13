@@ -1,0 +1,17 @@
+[package]
+name = "dbcore"
+description = "Database drivers and query engine for TableSoft"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tokio.workspace = true
+futures-util.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+sqlx.workspace = true
+mongodb.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

@@ -1,0 +1,80 @@
+# Test databases for TableSoft, each seeded with the "nasty schema".
+#
+#   docker compose up -d --wait     # start and block until every seed has finished
+#   docker compose down -v          # stop and throw the data away (re-seeds next time)
+#
+# Host ports are deliberately non-default so they never collide with a locally
+# installed server. The same URLs are the defaults in crates/dbcore/tests.
+
+name: tablesoft-testdb
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: tablesoft
+      POSTGRES_PASSWORD: tablesoft
+      POSTGRES_DB: tablesoft
+    ports: ["25432:5432"]
+    volumes:
+      - ./testdb/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # The init server only listens on a socket, so a TCP check passes only after seeding.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tablesoft -d tablesoft"]
+      interval: 2s
+      timeout: 5s
+      retries: 300
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: tablesoft
+      MYSQL_USER: tablesoft
+      MYSQL_PASSWORD: tablesoft
+      MYSQL_DATABASE: tablesoft
+    ports: ["23306:3306"]
+    volumes:
+      - ./testdb/mysql/01-nasty.sql:/docker-entrypoint-initdb.d/01-nasty.sql:ro
+    healthcheck:
+      # The init server runs with --skip-networking, so a TCP ping passes only after seeding.
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -utablesoft -ptablesoft --silent"]
+      interval: 2s
+      timeout: 5s
+      retries: 300
+
+  mariadb:
+    image: mariadb:11.8
+    environment:
+      MARIADB_ROOT_PASSWORD: tablesoft
+      MARIADB_USER: tablesoft
+      MARIADB_PASSWORD: tablesoft
+      MARIADB_DATABASE: tablesoft
+    ports: ["23307:3306"]
+    volumes:
+      - ./testdb/mysql/01-nasty.sql:/docker-entrypoint-initdb.d/01-nasty.sql:ro
+      - ./testdb/mariadb/02-mariadb-only.sql:/docker-entrypoint-initdb.d/02-mariadb-only.sql:ro
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 300
+
+  mongo:
+    # 8.0 refuses to start on Linux kernels >= 6.19 (SERVER-121912), which current Docker VMs ship.
+    image: mongo:8.2
+    environment:
+      MONGO_INITDB_DATABASE: tablesoft
+    ports: ["27117:27017"]
+    volumes:
+      - ./testdb/mongo:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # The init server binds to 127.0.0.1 only; checking via the container IP
+      # plus the seed marker means "healthy" only once the real server is up and seeded.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet --host "$$(hostname -i)" --eval
+          'quit(db.getSiblingDB("tablesoft").seed_done.countDocuments() === 1 ? 0 : 1)'
+      interval: 2s
+      timeout: 10s
+      retries: 300

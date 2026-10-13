@@ -1,0 +1,28 @@
+import { svelte } from '@sveltejs/vite-plugin-svelte'
+import { defineConfig } from 'vite'
+
+const host = process.env.TAURI_DEV_HOST
+
+// https://v2.tauri.app/start/frontend/vite/
+export default defineConfig({
+  plugins: [svelte()],
+  // Keep Rust errors visible in the terminal.
+  clearScreen: false,
+  server: {
+    port: 5173,
+    strictPort: true,
+    host: host || false,
+    hmr: host ? { protocol: 'ws', host, port: 5174 } : undefined,
+    watch: {
+      // The UI must iterate without triggering Rust rebuilds, and vice versa.
+      ignored: ['**/src-tauri/**', '**/crates/**', '**/target/**'],
+    },
+  },
+  envPrefix: ['VITE_', 'TAURI_ENV_*'],
+  build: {
+    // Tauri's web views: WebView2 (Chromium) on Windows, WebKit on macOS/Linux.
+    target: process.env.TAURI_ENV_PLATFORM === 'windows' ? 'chrome105' : 'safari15',
+    minify: !process.env.TAURI_ENV_DEBUG,
+    sourcemap: !!process.env.TAURI_ENV_DEBUG,
+  },
+})
