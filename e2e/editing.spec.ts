@@ -374,7 +374,7 @@ test.describe('production commits', () => {
     await form.getByRole('textbox', { name: 'Name', exact: true }).fill('Prod RW')
     await form.getByRole('radio', { name: 'Production' }).click()
     await form.getByRole('button', { name: 'Save' }).click()
-    await card(page, 'Prod RW').getByRole('button', { name: 'Open', exact: true }).click()
+    await card(page, 'Prod RW').getByRole('button', { name: /^Open / }).click()
     await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible()
     await openTableLoaded(page, 'customers')
   }
@@ -518,7 +518,6 @@ test.describe('details panel editing', () => {
     // BUG: Discard clears the grid selection, so TableView stops publishing a row to the inspector and the
     // Details panel keeps showing the discarded value ("Alicia") until another row is clicked
     // (TableView.svelte: the inspector.show effect returns early when `selection` is null).
-    test.fail()
     await input(page, 'name').fill('Alicia')
     await input(page, 'name').press('Enter')
     await action(page, 'Discard').click()

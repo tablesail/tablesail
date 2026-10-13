@@ -2,10 +2,36 @@
 // - on open, focus the element marked [autofocus], else the first field, else the first button
 //   (the HTML `autofocus` attribute is ignored when something else, like the grid, has focus)
 // - Tab and Shift-Tab stay inside the dialog
-// - on close, focus returns to whatever had it before (the grid, the editor…)
+// - on close, focus returns to whatever had it before (the grid, the editor…); when that element is gone
+//   (a menu item that opened the dialog), to the most recent element that still exists (the menu's button)
 
 const FOCUSABLE =
   'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
+
+// The last few elements that had the focus, oldest first.
+const recent: HTMLElement[] = []
+if (typeof document !== 'undefined') {
+  document.addEventListener(
+    'focusin',
+    (e) => {
+      const el = e.target
+      if (!(el instanceof HTMLElement) || el === document.body) return
+      const at = recent.indexOf(el)
+      if (at >= 0) recent.splice(at, 1)
+      recent.push(el)
+      if (recent.length > 12) recent.shift()
+    },
+    true,
+  )
+}
+
+/** Where focus goes back to: the element focused when the dialog opened, else the latest still-present one. */
+function returnTarget(node: HTMLElement, previous: HTMLElement | null): HTMLElement | null {
+  const usable = (el: HTMLElement | null | undefined): el is HTMLElement => !!el && el.isConnected && el !== document.body && !node.contains(el)
+  if (usable(previous)) return previous
+  for (let i = recent.length - 1; i >= 0; i--) if (usable(recent[i])) return recent[i]
+  return null
+}
 
 function focusables(node: HTMLElement): HTMLElement[] {
   return [...node.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null || el === document.activeElement)
@@ -53,8 +79,8 @@ export function dialogFocus(node: HTMLElement) {
       requestAnimationFrame(() => {
         const active = document.activeElement
         // Only if nothing else took the focus meanwhile (another dialog, a click elsewhere).
-        if (previous?.isConnected && (!active || active === document.body || !active.isConnected)) {
-          previous.focus({ preventScroll: true })
+        if (!active || active === document.body || !active.isConnected) {
+          returnTarget(node, previous)?.focus({ preventScroll: true })
         }
       })
     },

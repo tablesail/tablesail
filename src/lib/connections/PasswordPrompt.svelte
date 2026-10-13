@@ -38,7 +38,7 @@
     }}
   >
     <div>Enter the credentials for <b>{config.name}</b>.</div>
-    {#if error}<div class="error-text">{error}</div>{/if}
+    {#if error}<div class="error-text" role="alert">{error}</div>{/if}
     {#if needsDb}
       <label>
         Password for {config.user || 'user'}

@@ -3,6 +3,8 @@
   Closes on outside click, Escape, blur or scroll.
 -->
 <script lang="ts">
+  import { menuNav } from '../ui/menuNav'
+
   export interface MenuItem {
     label?: string
     onclick?: () => void
@@ -60,7 +62,7 @@
     onClose()
   }}
 ></div>
-<div class="menu" role="menu" tabindex="-1" bind:this={el} style:left="{left}px" style:top="{top}px">
+<div class="menu" role="menu" tabindex="-1" bind:this={el} use:menuNav={onClose} style:left="{left}px" style:top="{top}px">
   {#each items as item, i (i)}
     {#if item.separator}
       <div class="sep"></div>
@@ -110,16 +112,19 @@
     padding: 4px 10px;
   }
 
-  .item:hover:not(:disabled) {
+  .item:hover:not(:disabled),
+  .item:focus-visible:not(:disabled) {
     background: var(--accent);
     color: var(--accent-fg);
+    outline: none;
   }
 
   .item.danger {
     color: var(--danger);
   }
 
-  .item.danger:hover:not(:disabled) {
+  .item.danger:hover:not(:disabled),
+  .item.danger:focus-visible:not(:disabled) {
     background: var(--danger);
     color: #fff;
   }

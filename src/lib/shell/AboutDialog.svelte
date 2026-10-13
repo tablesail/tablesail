@@ -113,7 +113,7 @@
       {:else if phase.kind === 'unavailable'}
         <span class="muted">{phase.message}</span>
       {:else}
-        <span class="error-text">{phase.message}</span>
+        <span class="error-text" role="alert">{phase.message}</span>
         <button onclick={check}>Retry</button>
       {/if}
     </div>

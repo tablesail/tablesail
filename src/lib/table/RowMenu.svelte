@@ -2,6 +2,7 @@
   Small context menu at a screen position. Closes on outside click, Escape, blur or resize.
 -->
 <script lang="ts">
+  import { menuNav } from '../ui/menuNav'
   import type { RowMenuItem } from './menu'
 
   interface Props {
@@ -24,6 +25,7 @@
     const r = el.getBoundingClientRect()
     left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4))
     top = Math.max(4, Math.min(y, window.innerHeight - r.height - 4))
+    el.focus()
   })
 
   function run(item: RowMenuItem) {
@@ -57,6 +59,7 @@
     role="menu"
     tabindex="-1"
     bind:this={el}
+    use:menuNav={onClose}
     style:left="{left}px"
     style:top="{top}px"
     onmousedown={(e) => e.stopPropagation()}
@@ -96,6 +99,7 @@
     border: 1px solid var(--border);
     border-radius: 7px;
     box-shadow: 0 8px 28px rgb(0 0 0 / 0.28);
+    outline: none;
   }
 
   .item {
@@ -110,16 +114,19 @@
     text-align: left;
   }
 
-  .item:hover:not(:disabled) {
+  .item:hover:not(:disabled),
+  .item:focus-visible:not(:disabled) {
     background: var(--accent);
     color: var(--accent-fg, #fff);
+    outline: none;
   }
 
   .item.danger {
     color: var(--danger);
   }
 
-  .item.danger:hover:not(:disabled) {
+  .item.danger:hover:not(:disabled),
+  .item.danger:focus-visible:not(:disabled) {
     color: #fff;
     background: var(--danger);
   }

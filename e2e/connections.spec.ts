@@ -89,7 +89,7 @@ test.describe('connection list', () => {
     await expect(page.getByRole('button', { name: /MySQL 8\.4\.6 : Local MySQL : tablesoft/ })).toBeVisible()
     await showConnections(page)
     await expect(card(page, 'Local MySQL')).toContainText('Connected')
-    await expect(card(page, 'Local MySQL').getByRole('button', { name: 'Open', exact: true })).toHaveCount(0)
+    await expect(card(page, 'Local MySQL').getByRole('button', { name: /^Open / })).toHaveCount(0)
     // Opening an already-open connection just switches to it.
     await card(page, 'Local MySQL').dblclick()
     await expect(page.getByRole('button', { name: /Local MySQL/ })).toBeVisible()
@@ -104,7 +104,7 @@ test.describe('connection list', () => {
     await expect(page.getByRole('menuitem', { name: 'Switch to' })).toBeVisible()
     await page.getByRole('menuitem', { name: 'Disconnect' }).click()
     await expect(card(page, 'Local Postgres')).not.toContainText('Connected')
-    await expect(card(page, 'Local Postgres').getByRole('button', { name: 'Open', exact: true })).toBeVisible()
+    await expect(card(page, 'Local Postgres').getByRole('button', { name: /^Open / })).toBeVisible()
   })
 
   test('right-click opens the same card menu', async ({ page }) => {
@@ -128,7 +128,7 @@ test.describe('connection list', () => {
     await form.getByRole('button', { name: 'Save' }).click()
     await expect(dialog(page, 'New connection')).toHaveCount(0)
 
-    await card(page, 'Down DB').getByRole('button', { name: 'Open', exact: true }).click()
+    await card(page, 'Down DB').getByRole('button', { name: /^Open / }).click()
     await expect(card(page, 'Down DB')).toContainText('connection refused')
     await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toHaveCount(0)
   })
@@ -139,7 +139,7 @@ test.describe('connection list', () => {
     await form.getByRole('textbox', { name: 'Host', exact: true }).fill('locked.internal')
     await form.getByRole('button', { name: 'Save' }).click()
 
-    await card(page, 'Locked DB').getByRole('button', { name: 'Open', exact: true }).click()
+    await card(page, 'Locked DB').getByRole('button', { name: /^Open / }).click()
     const prompt = dialog(page, 'Password required')
     await expect(prompt).toBeVisible()
     await expect(prompt).toContainText('Locked DB')
@@ -456,7 +456,7 @@ test.describe('SQLite file flow', () => {
     await form.getByPlaceholder('/path/to/database.db').fill('/tmp/typed.db')
     await form.getByRole('textbox', { name: 'Name', exact: true }).fill('Typed SQLite')
     await form.getByRole('button', { name: 'Save' }).click()
-    await card(page, 'Typed SQLite').getByRole('button', { name: 'Open', exact: true }).click()
+    await card(page, 'Typed SQLite').getByRole('button', { name: /^Open / }).click()
     await expect(page.getByRole('button', { name: /SQLite 3\.50\.4 : Typed SQLite/ })).toBeVisible()
   })
 

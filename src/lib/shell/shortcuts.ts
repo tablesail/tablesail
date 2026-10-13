@@ -50,6 +50,11 @@ export function handleShortcut(e: KeyboardEvent): boolean {
     if (active) tabs.close(active.id)
     return true
   }
+  // ⌘R reloads the open table (TableView handles that); elsewhere it refreshes the schema.
+  if (lower === 'r' && !e.shiftKey && tabs.active(sid)?.kind !== 'table') {
+    void sessions.refreshSchema(sid, sessions.database(sid))
+    return true
+  }
   if (lower === 'p' && !e.shiftKey) {
     ui.palette = true
     return true

@@ -161,23 +161,39 @@
     return listEl ? [...listEl.querySelectorAll<HTMLElement>('.row')] : []
   }
 
+  // The tree is one tab stop: the row that was focused last (else the open table, else the first row) is
+  // tabindex 0 and every other row and section header is -1 (arrow keys move between them).
+  let focusKey = $state<string | null>(null)
+  let tabStop = $derived.by(() => {
+    const visible = sections.flatMap((sec) => (collapsed[sec.title] ? [] : sec.tables))
+    return (
+      visible.find((t) => key(t) === focusKey) ?? visible.find((t) => isActive(t)) ?? visible[0] ?? null
+    )
+  })
+
   /** Arrow keys walk the tree; Enter opens (keeps) the table; Right/Left expand and collapse. */
   function onListKey(e: KeyboardEvent) {
-    const rows = rowEls()
-    const i = rows.indexOf(document.activeElement as HTMLElement)
+    if (!listEl) return
+    // Section headers take part in the walk (they are not tab stops), but only tables are previewed.
+    const items = [...listEl.querySelectorAll<HTMLElement>('.row, .section')]
+    const i = items.indexOf(document.activeElement as HTMLElement)
+    const cur = i >= 0 ? items[i] : null
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
-      const next = rows[i < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]
+      const next = items[i < 0 ? 0 : Math.max(0, Math.min(items.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))]
       next?.focus()
       next?.scrollIntoView({ block: 'nearest' })
-      next?.click()
-    } else if (i >= 0 && e.key === 'Enter') {
+      if (next?.classList.contains('row')) next.click()
+    } else if (cur?.classList.contains('row') && e.key === 'Enter') {
       e.preventDefault()
-      rows[i].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
-    } else if (i >= 0 && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
-      e.preventDefault()
-      const open = rows[i].getAttribute('aria-expanded') === 'true'
-      if ((e.key === 'ArrowRight') !== open) rows[i].querySelector<HTMLElement>('.twist')?.click()
+      cur.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    } else if (cur && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+      const open = cur.getAttribute('aria-expanded') === 'true'
+      if (cur.classList.contains('row') || (e.key === 'ArrowRight') !== open) e.preventDefault()
+      if ((e.key === 'ArrowRight') !== open) {
+        if (cur.classList.contains('row')) cur.querySelector<HTMLElement>('.twist')?.click()
+        else cur.click()
+      }
     }
   }
 
@@ -206,7 +222,7 @@
   <span class="chev" class:open><Icon name="chevron-right" size={10} strokeWidth={1.8} /></span>
 {/snippet}
 
-<aside class="sidebar">
+<aside class="sidebar" aria-label="Sidebar">
   <div class="views" role="tablist">
     {#each VIEWS as v (v.id)}
       <button role="tab" aria-selected={ui.rail === v.id} class:on={ui.rail === v.id} onclick={() => setView(v.id)}>{v.label}</button>
@@ -224,7 +240,13 @@
   </div>
 
   <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="list" bind:this={listEl} onkeydown={onListKey}>
+  <div
+    class="list"
+    role={ui.rail === 'browser' ? 'tree' : undefined}
+    aria-label={ui.rail === 'browser' ? 'Database objects' : undefined}
+    bind:this={listEl}
+    onkeydown={onListKey}
+  >
     {#if ui.rail === 'browser'}
       {#if !entry.snapshot && entry.loading}
         <div class="note">Loading schema…</div>
@@ -235,7 +257,12 @@
       {/if}
 
       {#each sections as sec (sec.title)}
-        <button class="section" onclick={() => (collapsed[sec.title] = !collapsed[sec.title])} aria-expanded={!collapsed[sec.title]}>
+        <button
+          class="section"
+          tabindex="-1"
+          onclick={() => (collapsed[sec.title] = !collapsed[sec.title])}
+          aria-expanded={!collapsed[sec.title]}
+        >
           {@render chevron(!collapsed[sec.title])}
           {sec.title}
         </button>
@@ -247,9 +274,12 @@
               class="row"
               class:active={isActive(t)}
               role="treeitem"
+              aria-level="1"
+              aria-label={showSchemaInName && t.schema ? `${t.schema}.${t.name}` : t.name}
               aria-selected={isActive(t)}
               aria-expanded={hasColumns(t) ? !!expanded[k] : undefined}
-              tabindex="-1"
+              tabindex={tabStop && key(tabStop) === k ? 0 : -1}
+              onfocus={() => (focusKey = k)}
               title={`${t.name}${t.estimatedRows != null ? `\n≈ ${formatCount(t.estimatedRows)} rows` : ''}${t.comment ? `\n${t.comment}` : ''}`}
               onclick={() => tabs.openTable(session.sessionId, ref(t), undefined, { preview: true })}
               ondblclick={() => tabs.openTable(session.sessionId, ref(t))}
@@ -259,13 +289,17 @@
               }}
             >
               {#if hasColumns(t)}
-                <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-                <span
+                <!-- A pointer / screen-reader affordance; keyboard users expand with Right / Left on the row. -->
+                <button
                   class="twist"
+                  tabindex="-1"
+                  aria-label={expanded[k] ? 'Collapse columns' : 'Expand columns'}
+                  onmousedown={(e) => e.preventDefault()}
                   onclick={(e) => {
                     e.stopPropagation()
+                    e.currentTarget.closest<HTMLElement>('.row')?.focus()
                     void toggleExpand(t)
-                  }}>{@render chevron(!!expanded[k])}</span
+                  }}>{@render chevron(!!expanded[k])}</button
                 >
               {:else}
                 <span class="twist"></span>
@@ -284,7 +318,14 @@
             {#if expanded[k]}
               {@const cols = columnInfo[k] ?? (entry.snapshot?.columns[k] ?? []).map((name) => ({ name, type: '', pk: false }))}
               {#each cols as c (c.name)}
-                <div class="col" title={c.type ? `${c.name} ${c.type}` : c.name}>
+                <div
+                  class="col"
+                  role="treeitem"
+                  aria-level="2"
+                  aria-selected="false"
+                  aria-label={c.type ? `${c.name} ${c.type}` : c.name}
+                  title={c.type ? `${c.name} ${c.type}` : c.name}
+                >
                   <span class="cicon" class:pk={c.pk}>{#if c.pk}<Icon name="key" size={11} />{:else}<Icon name="columns" size={11} />{/if}</span>
                   <span class="name">{c.name}</span>
                   {#if c.type}<span class="ctype">{c.type}</span>{/if}
@@ -546,8 +587,19 @@
     flex: none;
     width: 14px;
     height: 100%;
+    min-height: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    color: inherit;
     align-items: center;
     justify-content: center;
+  }
+
+  .twist:hover:not(:disabled),
+  .twist:active:not(:disabled) {
+    background: none;
   }
 
   .ticon {

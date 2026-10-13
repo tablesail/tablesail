@@ -322,14 +322,14 @@
     {/if}
 
     {#if testResult}
-      <div class="notice ok">
+      <div class="notice ok" role="status">
         Connected. Server {testResult.serverVersion} · {testResult.elapsedMs} ms
       </div>
     {:else if testError}
-      <div class="notice bad">{testError}</div>
+      <div class="notice bad" role="alert">{testError}</div>
     {/if}
     {#if saveError}
-      <div class="notice bad">{saveError}</div>
+      <div class="notice bad" role="alert">{saveError}</div>
     {/if}
   </div>
 

@@ -144,6 +144,7 @@ export function createEditor(opts: EditorOptions): EditorHandle {
         placeholder(opts.schema.engine === 'mongodb' ? '' : 'Write SQL here. Cmd/Ctrl+Enter runs the current statement.'),
         lang.of(languageFor(opts.schema)),
         theme,
+        EditorView.contentAttributes.of({ 'aria-label': 'SQL editor' }),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) opts.onChange(u.state.doc.toString())
         }),

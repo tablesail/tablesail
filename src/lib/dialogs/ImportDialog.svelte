@@ -184,7 +184,7 @@
               {#each csvNames as name, i (i)}
                 <th>
                   <div class="csvname" title={name}>{name}</div>
-                  <select value={mapping[i] ?? ''} disabled={busy} onchange={(e) => setMapping(i, e.currentTarget.value)}>
+                  <select value={mapping[i] ?? ''} disabled={busy} aria-label="Target column for {name}" onchange={(e) => setMapping(i, e.currentTarget.value)}>
                     <option value="">(skip)</option>
                     {#each targets as c (c.name)}
                       <option value={c.name}>{c.name}</option>
@@ -212,7 +212,7 @@
       <div class="muted">Reading file…</div>
     {/if}
 
-    {#if loadError}<div class="error-text">{loadError}</div>{/if}
+    {#if loadError}<div class="error-text" role="alert">{loadError}</div>{/if}
     <JobStatus {job} verb="Imported" />
   </div>
 

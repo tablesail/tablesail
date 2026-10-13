@@ -104,7 +104,7 @@
 >
   {#if session}
     <div class="grp">
-      <button class="tb" class:on={!ui.sidebarHidden} title="Toggle sidebar" aria-label="Toggle sidebar" onclick={() => (ui.sidebarHidden = !ui.sidebarHidden)}>
+      <button class="tb" class:on={!ui.sidebarHidden} title="Toggle sidebar" aria-label="Toggle sidebar" aria-pressed={!ui.sidebarHidden} onclick={() => (ui.sidebarHidden = !ui.sidebarHidden)}>
         <Icon name="sidebar" size={16} />
       </button>
       <button class="tb" title="Connections" aria-label="Connections" onclick={() => (sessions.view = 'connections')}>
@@ -126,7 +126,7 @@
       {/if}
     </div>
     <div class="grp">
-      <button class="tb" title="Switch database" aria-label="Switch database" disabled={dbItems.length < 2} onclick={(e) => openAt(e, dbItems)}>
+      <button class="tb" title="Switch database" aria-label="Switch database" aria-haspopup="menu" disabled={dbItems.length < 2} onclick={(e) => openAt(e, dbItems)}>
         <Icon name="database" size={15} />
       </button>
       <button class="tb txt" title="New SQL query ({modLabel}T)" aria-label="New SQL query" onclick={() => session && tabs.newQuery(session.sessionId, database)}>
@@ -134,7 +134,7 @@
       </button>
     </div>
 
-    <button class="pill" title="Switch connection" onclick={(e) => openAt(e, pillItems)}>
+    <button class="pill" title="Switch connection" aria-haspopup="menu" onclick={(e) => openAt(e, pillItems)}>
       <span class="ptext">
         <span>{version}</span>
         <span class="colon">:</span>
@@ -149,18 +149,18 @@
       <button class="tb" title="Search tables and commands ({modLabel}K)" aria-label="Search" onclick={() => (ui.palette = true)}>
         <Icon name="search" size={15} />
       </button>
-      <button class="tb" title="Settings" aria-label="Menu" onclick={(e) => openAt(e, appItems, true)}>
+      <button class="tb" title="Menu" aria-label="Menu" aria-haspopup="menu" onclick={(e) => openAt(e, appItems, true)}>
         <Icon name="more" size={15} />
       </button>
     </div>
     <div class="grp">
-      <button class="tb" class:on={ui.console} title="Query log" aria-label="Toggle query log" onclick={() => (ui.console = !ui.console)}>
+      <button class="tb" class:on={ui.console} title="Query log" aria-label="Toggle query log" aria-pressed={ui.console} onclick={() => (ui.console = !ui.console)}>
         <Icon name="panel-bottom" size={16} />
       </button>
-      <button class="tb" class:on={inspector.open && inspector.tab === 'assistant'} title="AI assistant" aria-label="AI assistant" onclick={() => openInspector('assistant')}>
+      <button class="tb" class:on={inspector.open && inspector.tab === 'assistant'} title="AI assistant" aria-label="AI assistant" aria-pressed={inspector.open && inspector.tab === 'assistant'} onclick={() => openInspector('assistant')}>
         <Icon name="sparkle" size={16} />
       </button>
-      <button class="tb" class:on={inspector.open && inspector.tab === 'details'} title="Row details" aria-label="Toggle details panel" onclick={() => openInspector('details')}>
+      <button class="tb" class:on={inspector.open && inspector.tab === 'details'} title="Row details" aria-label="Toggle details panel" aria-pressed={inspector.open && inspector.tab === 'details'} onclick={() => openInspector('details')}>
         <Icon name="panel" size={16} />
       </button>
     </div>
@@ -175,7 +175,7 @@
       <button class="tb" title="Search ({modLabel}K)" aria-label="Search" onclick={() => (ui.palette = true)}>
         <Icon name="search" size={15} />
       </button>
-      <button class="tb" aria-label="Menu" title="Menu" onclick={(e) => openAt(e, appItems, true)}>
+      <button class="tb" aria-label="Menu" title="Menu" aria-haspopup="menu" onclick={(e) => openAt(e, appItems, true)}>
         <Icon name="more" size={15} />
       </button>
     </div>

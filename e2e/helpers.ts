@@ -24,7 +24,7 @@ export function card(page: Page, name: string): Locator {
 /** Opens a saved connection from the welcome screen and waits for the workspace and its schema. */
 export async function openConnection(page: Page, name = 'Local Postgres') {
   await gotoApp(page)
-  await card(page, name).getByRole('button', { name: 'Open', exact: true }).click()
+  await card(page, name).getByRole('button', { name: /^Open / }).click()
   await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible()
   await expect(page.getByRole('treeitem').first()).toBeVisible()
 }
@@ -48,7 +48,7 @@ export const inspector = (page: Page) =>
 
 export const tableRow = (page: Page, name: string) => page.getByRole('treeitem', { name, exact: true })
 
-/** A tab in the strip. Its accessible name also contains the close button's label, so match by title text. */
+/** A tab in the strip, found by its title (the tab's accessible name is just the title). */
 export const tabNamed = (page: Page, title: string | RegExp) =>
   page.getByRole('tab', { name: title instanceof RegExp ? title : new RegExp(`${escapeRe(title)}$`) })
 

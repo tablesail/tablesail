@@ -21,6 +21,9 @@
 
   let gridSel = $state.raw<GridSelection | null>(null)
 
+  // Ids tying the Result / Messages tabs to the one panel below them.
+  const uid = $props.id()
+
   interface SetTab {
     key: string
     stmt: number
@@ -111,12 +114,19 @@
 <div class="results">
   <div class="tabs" role="tablist">
     {#each setTabs as t (t.key)}
-      <button role="tab" class:on={activeKey === t.key} aria-selected={activeKey === t.key} onclick={() => select(t.key)}
-        >{t.label}</button
+      <button
+        role="tab"
+        id="{uid}-tab-{t.key}"
+        aria-controls="{uid}-panel"
+        class:on={activeKey === t.key}
+        aria-selected={activeKey === t.key}
+        onclick={() => select(t.key)}>{t.label}</button
       >
     {/each}
     <button
       role="tab"
+      id="{uid}-tab-messages"
+      aria-controls="{uid}-panel"
       class:on={activeKey === 'messages'}
       aria-selected={activeKey === 'messages'}
       onclick={() => select('messages')}
@@ -125,7 +135,7 @@
     </button>
   </div>
 
-  <div class="content">
+  <div class="content" role="tabpanel" id="{uid}-panel" aria-labelledby="{uid}-tab-{activeKey}">
     {#if activeSet}
       {@const info = runner.info(activeSet.stmt, activeSet.set)}
       <div class="grid">
@@ -136,6 +146,7 @@
             getRow={(i) => runner.getRow(activeSet.stmt, activeSet.set, i)}
             onNeedRows={(a, b) => runner.needRows(activeSet.stmt, activeSet.set, a, b)}
             revision={runner.revision}
+            label={activeSet.label}
             onSelectionChange={(sel) => (gridSel = sel)}
           />
         {/key}
@@ -154,7 +165,7 @@
     {:else}
       <div class="messages">
         {#if runner.runError}
-          <div class="msg bad">{runner.runError}</div>
+          <div class="msg bad" role="alert">{runner.runError}</div>
         {/if}
         {#if !runner.status && !runner.runError}
           <div class="muted pad">{runner.running ? 'Starting…' : 'Run a query to see results here.'}</div>

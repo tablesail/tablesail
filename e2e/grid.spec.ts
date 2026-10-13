@@ -213,7 +213,8 @@ test.describe('row selection and the Details panel', () => {
   test('foreign key fields offer a jump to the related row', async ({ page }) => {
     await openTableLoaded(page, 'orders')
     await gridCell(page, 0, 1).click()
-    const related = inspector(page).getByRole('button', { name: /customer_id/ })
+    // ^: the field's "Field options for customer_id" button also contains the column name.
+    const related = inspector(page).getByRole('button', { name: /^customer_id/ })
     await expect(related).toContainText('→ customers')
     await related.click()
     await expect(tabNamed(page, 'customers (filtered)')).toHaveCount(1)

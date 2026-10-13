@@ -121,7 +121,7 @@
         <span class="muted"> · dump shows the first {formatBytes(shown)}</span>
       {/if}
     </p>
-    {#if loadError}<p class="error-text">{loadError}</p>{/if}
+    {#if loadError}<p class="error-text" role="alert">{loadError}</p>{/if}
     {#if imageUrl}
       <img class="preview" src={imageUrl} alt="Stored data" />
     {/if}

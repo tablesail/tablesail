@@ -510,7 +510,6 @@ test.describe('toolbar menu', () => {
   test('the Refresh button advertises ⌘R and the shortcut refreshes the schema when no table is open', async ({ page }) => {
     // BUG: the toolbar's Refresh button title says "Refresh (⌘R)" but with no table tab open ⌘R does
     // nothing app-wide (only a table tab handles it, for its own data) — the schema is not refreshed.
-    test.fail()
     await openConnection(page)
     await recordInvokes(page)
     await page.keyboard.press(`${MOD}+r`)

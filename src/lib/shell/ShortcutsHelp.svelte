@@ -20,7 +20,7 @@
     ['Run whole script (or selection)', `${M}+Shift+Enter`],
     ['Commit pending changes', `${M}+S`],
     ['Refresh table data', `${M}+R`],
-    ['Show / hide filters', `${M}+F`],
+    ['Filters bar (show / hide)', `${M}+F`],
     ['Duplicate selected rows', `${M}+D`],
     ['Set selected cells to NULL', `${M}+Shift+N  or  ${M}+Backspace`],
     ['Delete selected rows', 'Delete'],

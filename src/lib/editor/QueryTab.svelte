@@ -203,7 +203,7 @@
     <span class="spacer"></span>
     <label class="db" title="Database">
       <Icon name="database" size={13} />
-      <select value={tab.database} onchange={(e) => tabs.updateQuery(tab.id, { database: e.currentTarget.value })}>
+      <select value={tab.database} aria-label="Database" onchange={(e) => tabs.updateQuery(tab.id, { database: e.currentTarget.value })}>
         {#each session.databases as db (db)}
           <option value={db}>{db}</option>
         {/each}

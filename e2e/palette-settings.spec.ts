@@ -341,7 +341,6 @@ test.describe('keyboard shortcuts help', () => {
     // BUG: ShortcutsHelp.svelte only lists 9 global shortcuts. Missing although implemented: ⌘S commit,
     // ⌘F filters, ⌘R refresh, ⌘D duplicate row, ⌘⇧N set NULL, ⌘A / ⌘C in the grid, Delete, ⌘N new connection,
     // Enter/F2 to edit and the sidebar arrow keys.
-    test.fail()
     await openConnection(page)
     await page.keyboard.press(`${MOD}+/`)
     const help = dialog(page, 'Keyboard shortcuts')
@@ -384,9 +383,6 @@ test.describe('settings', () => {
   })
 
   test('appearance: the mode buttons expose their pressed state to assistive tech', async ({ page }) => {
-    // BUG: the System/Light/Dark segmented buttons only change a CSS class (`.on`); there is no aria-pressed /
-    // role=radio, so a screen reader cannot tell which one is selected (SettingsDialog.svelte `.seg`).
-    test.fail()
     await settings(page).getByRole('button', { name: 'Dark', exact: true }).click()
     await expect(settings(page).getByRole('button', { name: 'Dark', exact: true })).toHaveAttribute('aria-pressed', 'true', { timeout: 1500 })
   })

@@ -50,7 +50,7 @@ test.describe('assistant: empty state', () => {
 
   test('MongoDB talks about collections and documents', async ({ page }) => {
     await page.getByRole('button', { name: 'Connections', exact: true }).click()
-    await card(page, 'Mongo').getByRole('button', { name: 'Open', exact: true }).click()
+    await card(page, 'Mongo').getByRole('button', { name: /^Open / }).click()
     await expect(page.getByRole('button', { name: /MongoDB 8\.2\.1/ })).toBeVisible()
     await expect(panel(page).locator('.chip').nth(0)).toContainText('documents of all_types')
     await expect(panel(page).locator('.chip').nth(1)).toContainText('Which collections reference')

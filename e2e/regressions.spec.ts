@@ -260,7 +260,6 @@ for (const [width, height] of [
     test('with the Details panel open the row count and timing are not cut off', async ({ page }) => {
       // BUG: .info (flex: 1 1 0; min-width: 60px) is squeezed to ~60px when the panel is open, so the text
       // "≈1,000,000 rows  3 ms" is silently clipped (TableView.svelte .bottombar .info).
-      test.fail()
       await openConnection(page)
       await openTableLoaded(page, 'big_table')
       await gridCell(page, 0, 0).click()
@@ -272,7 +271,6 @@ for (const [width, height] of [
       // BUG: editing a cell opens the Details panel and adds the "N change / Preview / Discard / Commit" group;
       // together they push Columns, Refresh, Export and Import beyond the right edge of the bar, where they are
       // clipped (TableView.svelte .bottombar has no overflow handling / responsive collapse).
-      test.fail()
       await openConnection(page)
       await openTableLoaded(page, 'big_table')
       await editFirstName(page, 'zz')

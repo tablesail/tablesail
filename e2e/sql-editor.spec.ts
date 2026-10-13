@@ -280,7 +280,7 @@ test.describe('format', () => {
 
   test('Format is not offered for MongoDB', async ({ page }) => {
     await page.getByRole('button', { name: /Connections/ }).first().click()
-    await page.getByRole('option', { name: /^Mongo\b/ }).getByRole('button', { name: 'Open', exact: true }).click()
+    await page.getByRole('option', { name: /^Mongo\b/ }).getByRole('button', { name: /^Open / }).click()
     await expect(page.getByRole('button', { name: /MongoDB 8\.2\.1/ })).toBeVisible()
     await page.getByRole('button', { name: 'New SQL query' }).click()
     await expect(sqlEditor(page)).toBeVisible()

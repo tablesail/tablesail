@@ -35,6 +35,7 @@
     onKeyDown    (event) => boolean        called first for keys pressed on the focused grid;
                                            return true to swallow the key
     emptyMessage string                    shown when rowCount is 0 (default "No rows")
+    label        string                    accessible name of the grid (e.g. the table name)
 
   Exported methods (bind:this): focus(), edit(row, col), getSelection(), selectCell(row, col), selectRows(from, to),
   scrollToRow(row), copySelection(withHeader?), clearSelection().
@@ -78,6 +79,7 @@
     onContextMenu?: (e: MouseEvent, row: number, col: number) => void
     onKeyDown?: (e: KeyboardEvent) => boolean
     emptyMessage?: string
+    label?: string
   }
 
   let {
@@ -101,7 +103,12 @@
     onContextMenu,
     onKeyDown,
     emptyMessage = 'No rows',
+    label,
   }: Props = $props()
+
+  // Cells carry stable ids (`<uid>-<row>-<col>`) so the grid can point aria-activedescendant at the active one.
+  const uid = $props.id()
+  const cellId = (r: number, c: number) => `${uid}-${r}-${c}`
 
   const DEFAULT_W = 120
   const MIN_W = 48
@@ -779,31 +786,40 @@
   role="grid"
   style:--row-h="{ROW_H}px"
   style:--head-h="{HEADER_H}px"
-  aria-rowcount={rowCount}
+  aria-label={label}
+  aria-multiselectable="true"
+  aria-rowcount={rowCount + 1}
   aria-colcount={nCols}
+  aria-activedescendant={selection ? cellId(selection.activeRow, selection.activeCol) : undefined}
   onscroll={onScroll}
   onkeydown={onKeydown}
 >
-  <div class="spacer" style:width="{spacerW}px" style:height="{vm.spacerH}px">
-    <div class="window" style:width="{clientW}px" style:height="{clientH}px">
-      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="spacer" role="presentation" style:width="{spacerW}px" style:height="{vm.spacerH}px">
+    <div class="window" role="presentation" style:width="{clientW}px" style:height="{clientH}px">
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
       <div
         class="corner"
+        role="button"
+        aria-label="Select all"
+        aria-keyshortcuts="Control+A Meta+A"
         style:width="{gutterW}px"
         onclick={() => rowCount > 0 && setSelection({ r: 0, c: 0 }, { r: rowCount - 1, c: nCols - 1 })}
       >
         #
       </div>
 
-      <div class="header" style:left="{gutterW}px">
-        <div class="hrow" style:transform="translateX({-scrollLeft}px)">
+      <div class="header" role="presentation" style:left="{gutterW}px">
+        <div class="hrow" role="row" aria-rowindex="1" style:width="{totalW}px" style:transform="translateX({-scrollLeft}px)">
           {#each colIdx as c (c)}
             {@const col = columns[c]}
             {@const srt = sortOf(col.name)}
             {@const hint = columnHint?.(c)}
-            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_interactive_supports_focus -->
             <div
               class="h"
+              role="columnheader"
+              aria-colindex={c + 1}
+              aria-sort={srt ? (srt.descending ? 'descending' : 'ascending') : undefined}
               class:sortable={!!onSort}
               style:left="{colLeft[c]}px"
               style:width="{effWidths[c]}px"
@@ -812,10 +828,11 @@
             >
               <span class="hname">{col.name}</span>
               {#if hint}<span class="badge">{hint}</span>{/if}
-              {#if srt}<span class="sort">{srt.descending ? '▼' : '▲'}</span>{/if}
+              {#if srt}<span class="sort" aria-hidden="true">{srt.descending ? '▼' : '▲'}</span>{/if}
               <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
               <div
                 class="resize"
+                aria-hidden="true"
                 onpointerdown={(e) => startResize(e, c)}
                 onclick={(e) => e.stopPropagation()}
                 ondblclick={(e) => {
@@ -829,7 +846,7 @@
       </div>
 
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="gutter" style:width="{gutterW}px" onpointerdown={onGutterDown}>
+      <div class="gutter" aria-hidden="true" style:width="{gutterW}px" onpointerdown={onGutterDown}>
         <div class="gcol" style:transform="translateY({-rowsShift}px)">
           {#each rowIdx as r (r)}
             <div class="g" class:on={selection && r >= selection.row0 && r <= selection.row1}>
@@ -842,28 +859,42 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="body"
+        role="presentation"
         bind:this={bodyEl}
         style:left="{gutterW}px"
         onpointerdown={onBodyDown}
         ondblclick={onBodyDblClick}
         oncontextmenu={onBodyContext}
       >
-        <div class="rows" style:width="{Math.max(totalW, bodyW)}px" style:transform="translate({-scrollLeft}px, {-rowsShift}px)">
+        <div class="rows" role="presentation" style:width="{Math.max(totalW, bodyW)}px" style:transform="translate({-scrollLeft}px, {-rowsShift}px)">
           {#each rowIdx as r (r)}
             {@const row = rowAt(r, revision)}
-            <div class="row {rowClass?.(r) ?? ''}" class:alt={r % 2 === 1} class:cur={selection?.activeRow === r}>
+            {@const rowSel = selection && r >= selection.row0 && r <= selection.row1 ? selection : null}
+            <div class="row {rowClass?.(r) ?? ''}" role="row" aria-rowindex={r + 2} class:alt={r % 2 === 1} class:cur={selection?.activeRow === r}>
               {#each colIdx as c (c)}
                 {#if row}
                   {@const f = formatValue(row[c], columns[c].family)}
                   <div
                     class="cell {f.cls} {cellClass?.(r, c) ?? ''}"
+                    role="gridcell"
+                    id={cellId(r, c)}
+                    aria-colindex={c + 1}
+                    aria-selected={rowSel && c >= rowSel.col0 && c <= rowSel.col1 ? 'true' : undefined}
                     style:left="{colLeft[c]}px"
                     style:width="{effWidths[c]}px"
                   >
                     {#if columns[c].family === 'enum' && typeof row[c] === 'string' && statusTone(f.text) !== 'neutral'}<span class="pill {statusTone(f.text)}">{f.text}</span>{:else}{f.text}{/if}
                   </div>
                 {:else}
-                  <div class="cell ph" style:left="{colLeft[c]}px" style:width="{effWidths[c]}px"></div>
+                  <div
+                    class="cell ph"
+                    role="gridcell"
+                    id={cellId(r, c)}
+                    aria-colindex={c + 1}
+                    aria-busy="true"
+                    style:left="{colLeft[c]}px"
+                    style:width="{effWidths[c]}px"
+                  ></div>
                 {/if}
               {/each}
             </div>
@@ -873,6 +904,7 @@
         {#if selRect}
           <div
             class="sel"
+            aria-hidden="true"
             style:left="{selRect.left}px"
             style:top="{selRect.top}px"
             style:width="{selRect.width}px"
@@ -882,6 +914,7 @@
         {#if activeRect}
           <div
             class="active"
+            aria-hidden="true"
             style:left="{activeRect.left}px"
             style:top="{activeRect.top}px"
             style:width="{activeRect.width}px"

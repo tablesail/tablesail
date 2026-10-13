@@ -173,7 +173,7 @@ test.describe('export dialog', () => {
 
   test('the export button is available on every kind of table, including read-only connections', async ({ page }) => {
     await page.getByRole('button', { name: 'Connections', exact: true }).click()
-    await page.getByRole('option', { name: /^Production/ }).getByRole('button', { name: 'Open', exact: true }).click()
+    await page.getByRole('option', { name: /^Production/ }).getByRole('button', { name: /^Open / }).click()
     await openTableLoaded(page, 'customers')
     await expect(exportButton(page)).toBeEnabled()
   })
@@ -200,7 +200,7 @@ test.describe('import dialog', () => {
     await expect(importButton(page)).toBeDisabled()
 
     await page.getByRole('button', { name: 'Connections', exact: true }).click()
-    await page.getByRole('option', { name: /^Local Postgres/ }).getByRole('button', { name: 'Open', exact: true }).click()
+    await page.getByRole('option', { name: /^Local Postgres/ }).getByRole('button', { name: /^Open / }).click()
     await openTableLoaded(page, 'customer_totals')
     await expect(importButton(page)).toBeDisabled()
     await tableRow(page, 'customer_totals').click({ button: 'right' })
@@ -330,9 +330,6 @@ test.describe('import dialog', () => {
   })
 
   test('the column selects in the mapping table have an accessible name', async ({ page }) => {
-    // BUG: each mapping <select> in ImportDialog sits in a table header next to a .csvname div with no
-    // label/aria-label, so a screen reader announces N identical unnamed comboboxes.
-    test.fail()
     await openConnection(page)
     await openTableLoaded(page, 'customers')
     await setDialog(page, { open: '/tmp/people.csv' })

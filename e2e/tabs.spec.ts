@@ -24,8 +24,8 @@ const prev = (page: Page) => page.getByRole('button', { name: 'Previous tab' })
 const next = (page: Page) => page.getByRole('button', { name: 'Next tab' })
 const label = (page: Page, title: string) => tabNamed(page, title).locator('.t')
 
-/** Closes a tab with its x button (the button's accessible name is just "Close tab"). */
-const closeButton = (page: Page, title: string) => tabNamed(page, title).getByRole('button', { name: 'Close tab' })
+/** A tab's x button; it sits next to the tab (not inside it) and is named "Close tab <title>". */
+const closeButton = (page: Page, title: string) => page.getByRole('button', { name: `Close tab ${title}`, exact: true })
 
 test.describe('table tabs', () => {
   test.beforeEach(async ({ page }) => {
@@ -222,7 +222,7 @@ test.describe('table tabs', () => {
     await openTableLoaded(page, 'customers')
     await openTableLoaded(page, 'orders')
     await gridCell(page, 0, 1).click()
-    await inspector(page).getByRole('button', { name: /customer_id/ }).click()
+    await inspector(page).getByRole('button', { name: /^customer_id/ }).click()
     const titles = await tabTitles(page)
     expect(new Set(titles).size).toBe(titles.length)
   })
@@ -348,7 +348,7 @@ test.describe('restoring tabs', () => {
   }
 
   async function reopen(page: Page) {
-    await card(page, 'Local Postgres').getByRole('button', { name: 'Open', exact: true }).click()
+    await card(page, 'Local Postgres').getByRole('button', { name: /^Open / }).click()
     await expect(page.getByRole('button', { name: 'Toggle sidebar' })).toBeVisible()
   }
 
@@ -413,7 +413,7 @@ test.describe('restoring tabs', () => {
     await openConnection(page)
     await openTable(page, 'customers')
     await disconnect(page)
-    await card(page, 'Local MySQL').getByRole('button', { name: 'Open', exact: true }).click()
+    await card(page, 'Local MySQL').getByRole('button', { name: /^Open / }).click()
     await expect(page.getByRole('button', { name: /^MySQL 8\.4\.6/ })).toBeVisible()
     expect(await tabTitles(page)).toEqual([])
     await openTable(page, 'orders')
@@ -494,9 +494,7 @@ test.describe('sidebar keyboard navigation', () => {
   })
 
   test('sidebar rows can be reached with the Tab key', async ({ page }) => {
-    // BUG: rows are tabindex="-1" and there is no roving tabindex, so Tab from the search box skips the whole
-    // tree; a keyboard user has to know to press ArrowDown inside the search field (Sidebar.svelte `.row`).
-    test.fail()
+    // The tree is a single tab stop (roving tabindex); section headers are reached with the arrow keys.
     await sidebar(page).getByPlaceholder('Search for item…').focus()
     await page.keyboard.press('Tab')
     await expect(sidebar(page).getByRole('treeitem').first()).toBeFocused()

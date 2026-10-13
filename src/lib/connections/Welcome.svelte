@@ -148,12 +148,27 @@
     const t = e.target as HTMLElement | null
     if (t !== searchEl && t?.closest('input, textarea, select, [role="dialog"]')) return
     const i = flat.findIndex((c) => c.id === selectedId)
+    // With the focus on a card, the focus follows the selection; from the search box it stays in the box.
+    const onCard = !!t?.closest('.card')
+    const select = (id: string | undefined) => {
+      if (!id) return
+      selectedId = id
+      if (onCard) document.querySelector<HTMLElement>(`[data-conn="${CSS.escape(id)}"]`)?.focus()
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      selectedId = flat[Math.min(flat.length - 1, i + 1)]?.id ?? selectedId
+      select(flat[Math.min(flat.length - 1, i + 1)]?.id)
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      selectedId = flat[Math.max(0, i - 1)]?.id ?? selectedId
+      select(flat[Math.max(0, i - 1)]?.id)
+    } else if (e.key === 'Home' && onCard) {
+      e.preventDefault()
+      select(flat[0]?.id)
+    } else if (e.key === 'End' && onCard) {
+      e.preventDefault()
+      select(flat[flat.length - 1]?.id)
+    } else if (e.key === 'Enter' && t?.closest('button')) {
+      // Enter on a card's own buttons (Open, Actions) belongs to the button.
     } else if (e.key === 'Enter' && i >= 0) {
       e.preventDefault()
       void openConnection(flat[i])
@@ -187,7 +202,7 @@
       </div>
 
       {#if connections.error}
-        <div class="empty error-text">Could not load connections: {connections.error}</div>
+        <div class="empty error-text" role="alert">Could not load connections: {connections.error}</div>
       {:else if !connections.loaded}
         <div class="empty">Loading…</div>
       {:else if connections.list.length === 0}
@@ -196,7 +211,7 @@
         <div class="empty">No connections match “{search}”.</div>
       {/if}
 
-      <div class="cards">
+      <div class="cards" role="listbox" aria-label="Saved connections">
         {#each flat as c (c.id)}
           {@const live = sessions.byConnection(c.id)}
           <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
@@ -207,7 +222,7 @@
             data-conn={c.id}
             role="option"
             aria-selected={c.id === selectedId}
-            tabindex="-1"
+            tabindex={c.id === selectedId ? 0 : -1}
             onclick={() => (selectedId = c.id)}
             ondblclick={() => openConnection(c)}
             oncontextmenu={(e) => showMenu(e, c)}
@@ -220,7 +235,7 @@
               </div>
               <button
                 class="icon more"
-                aria-label="Actions"
+                aria-label="Actions for {c.name}"
                 onclick={(e) => {
                   e.stopPropagation()
                   showMenu(e, c)
@@ -237,11 +252,11 @@
               {:else if live}
                 <span class="state on"><i class="live-dot"></i> Connected</span>
               {:else}
-                <button class="open" onclick={(e) => { e.stopPropagation(); openConnection(c) }}>Open</button>
+                <button class="open" aria-label="Open {c.name}" onclick={(e) => { e.stopPropagation(); openConnection(c) }}>Open</button>
               {/if}
             </div>
             {#if openError?.id === c.id}
-              <div class="err error-text">{openError.message}</div>
+              <div class="err error-text" role="alert">{openError.message}</div>
             {/if}
           </div>
         {/each}
@@ -382,6 +397,11 @@
   .card.selected {
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
+  }
+
+  .card:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--accent);
   }
 
   .top {

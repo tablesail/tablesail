@@ -18,7 +18,7 @@
     </div>
     <div class="line">
       {#if p.error}
-        <span class="error-text">{p.error}</span>
+        <span class="error-text" role="alert">{p.error}</span>
       {:else if p.cancelled}
         <span class="warn">Cancelled after {formatCount(p.rows)} rows.</span>
       {:else if p.done}

@@ -65,6 +65,14 @@
 
   let { session, table, active, tabId = '', initialFilters, onExport, onImport }: Props = $props()
 
+  // Ids tying the Data / Structure / Relations tabs to the one panel below them.
+  const uid = $props.id()
+  const viewTabs = [
+    { key: 'data', label: 'Data' },
+    { key: 'structure', label: 'Structure' },
+    { key: 'relations', label: 'Relations' },
+  ] as const
+
   const PAGE_SIZE = 200
   const MAX_PAGES = 100
   const FETCH_THROTTLE_MS = 80
@@ -797,8 +805,11 @@
   }
 
   function discard() {
+    // Inserted rows disappear, which shifts row indices; otherwise keep the selection so the
+    // Details panel shows the stored values again.
+    const hadInserts = store.insertCount > 0
     store.clear()
-    grid?.clearSelection()
+    if (hadInserts) grid?.clearSelection()
   }
 
   // ---------------------------------------------------------------------------
@@ -1051,7 +1062,7 @@
     />
   {/if}
 
-  <div class="main">
+  <div class="main" role="tabpanel" id="{uid}-panel" aria-labelledby="{uid}-tab-{tab}">
     <div class="pane" hidden={tab !== 'data'}>
       {#if columns.length === 0 && (loading || loadError)}
         <div class="center muted">{loadError ? 'Could not load the table.' : 'Loading…'}</div>
@@ -1072,6 +1083,7 @@
           {rowClass}
           {cellClass}
           {rowLabel}
+          label={table.name}
           {columnHint}
           onSelectionChange={(s) => (selection = s)}
           {onContextMenu}
@@ -1108,11 +1120,18 @@
     {/if}
   </div>
 
-  <div class="bottombar">
+  <div class="bottombar" class:pending={tab === 'data' && !store.isEmpty}>
     <div class="seg" role="tablist">
-      <button role="tab" aria-selected={tab === 'data'} class:on={tab === 'data'} onclick={() => (tab = 'data')}>Data</button>
-      <button role="tab" aria-selected={tab === 'structure'} class:on={tab === 'structure'} onclick={() => (tab = 'structure')}>Structure</button>
-      <button role="tab" aria-selected={tab === 'relations'} class:on={tab === 'relations'} onclick={() => (tab = 'relations')}>Relations</button>
+      {#each viewTabs as v (v.key)}
+        <button
+          role="tab"
+          id="{uid}-tab-{v.key}"
+          aria-selected={tab === v.key}
+          aria-controls="{uid}-panel"
+          class:on={tab === v.key}
+          onclick={() => (tab = v.key)}>{v.label}</button
+        >
+      {/each}
     </div>
 
     {#if tab === 'data'}
@@ -1120,15 +1139,15 @@
       <button class="bb io" disabled={!editable || !selection} title="Delete selected rows (Delete)" aria-label="Delete selected rows" onclick={deleteSelected}><Icon name="trash" size={12} /></button>
     {/if}
 
-    <div class="info" title={tab === 'data' ? lastQuery : ''}>
+    <div class="info" class:tight={!store.isEmpty} title={tab === 'data' ? lastQuery : ''}>
       {#if tab === 'data'}
         {#if loadError}
           <span class="err">Query failed</span>
         {:else}
           <span>{countText}{store.insertCount > 0 ? ` + ${store.insertCount} new` : ''}</span>
-          {#if lastMs !== null}<span class="dim">{lastMs < 1 ? '<1' : Math.round(lastMs)} ms</span>{/if}
+          {#if lastMs !== null && store.isEmpty}<span class="dim">{lastMs < 1 ? '<1' : Math.round(lastMs)} ms</span>{/if}
         {/if}
-        {#if selectionText}<span class="dim">{selectionText}</span>{/if}
+        {#if selectionText && store.isEmpty}<span class="dim">{selectionText}</span>{/if}
       {:else if structure}
         <span>{structure.columns.length} columns · {structure.indexes.length} indexes · {structure.foreignKeys.length} foreign keys</span>
       {/if}
@@ -1136,6 +1155,7 @@
     </div>
 
     {#if tab === 'data' && !store.isEmpty}
+      <!-- While changes are pending the quick filter steps aside to make room for them. -->
       <div class="changes">
         <span class="pending-label">{store.pending} change{store.pending === 1 ? '' : 's'}</span>
         <button class="bb" onclick={previewSql}>Preview</button>
@@ -1147,6 +1167,7 @@
     {/if}
 
     {#if tab === 'data'}
+      {#if store.isEmpty}
       <label class="quick">
         <Icon name="search" size={12} />
         <input
@@ -1158,6 +1179,7 @@
           oninput={() => quick === '' && applied.filters.length > 0 && applyQuick()}
         />
       </label>
+      {/if}
       <button class="bb" class:on={showFilters || (appliedCount > 0 && !quick)} title="Filters (⌘F)" onclick={toggleFilters}>
         <Icon name="filter" size={12} /><span class="lbl">Filters</span>{#if appliedCount > 0 && !quick}<span class="count">{appliedCount}</span>{/if}
       </button>
@@ -1293,7 +1315,7 @@
 
 {#if errorInfo}
   <Modal title={errorInfo.title} width="640px" onClose={() => (errorInfo = null)}>
-    <p class="error-text">{errorInfo.message}{errorInfo.code ? ` (${errorInfo.code})` : ''}</p>
+    <p class="error-text" role="alert">{errorInfo.message}{errorInfo.code ? ` (${errorInfo.code})` : ''}</p>
     {#if errorInfo.statement}
       <p class="muted">Failing statement</p>
       <pre class="sql-block">{errorInfo.statement}</pre>
@@ -1430,14 +1452,28 @@
     box-shadow: none;
   }
 
-  /* Narrow bars (details panel open, pending changes): icons only, then drop the quick filter. */
+  /* Narrow bars (details panel open): icons only, then drop the quick filter. */
   @container bottombar (max-width: 860px) {
+    /* Visually hidden, still the button's accessible name. */
     .bb .lbl {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+
+    .pending-label {
       display: none;
     }
 
     .info .dim {
       display: none;
+    }
+
+    .bottombar .seg button {
+      padding: 0 8px;
     }
   }
 
@@ -1445,10 +1481,29 @@
     .quick {
       display: none;
     }
+  }
 
-    .pending-label {
-      display: none;
-    }
+  /* Pending changes need the room: icon-only buttons (they keep their titles). */
+  .bottombar.pending .bb .lbl {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  /* With pending changes the counts may shorten (ellipsis) so the change buttons fit. */
+  .info.tight {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: flex-start;
+    white-space: nowrap;
+  }
+
+  .info.tight > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   /* Bordered push button (TablePlus "+ Row", "Filters"). */
@@ -1514,8 +1569,9 @@
   }
 
   .info {
-    flex: 1 1 0;
-    min-width: 60px;
+    /* Never squeezed below its text: the quick filter gives up space first. */
+    flex: 1 0 auto;
+    min-width: max-content;
     display: flex;
     justify-content: center;
     gap: 12px;
@@ -1542,7 +1598,6 @@
     align-items: center;
     gap: 2px;
     height: 26px;
-    margin-right: 4px;
     padding: 0 2px 0 9px;
     border-radius: 7px;
     background: color-mix(in srgb, var(--warning) 14%, transparent);

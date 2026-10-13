@@ -153,7 +153,7 @@
       </div>
     </label>
 
-    {#if startError}<div class="error-text">{startError}</div>{/if}
+    {#if startError}<div class="error-text" role="alert">{startError}</div>{/if}
     <JobStatus {job} verb="Exported" />
   </div>
 

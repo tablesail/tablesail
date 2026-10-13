@@ -80,7 +80,7 @@
     <p class="muted">Loading the full value…</p>
   {/if}
   {#if loadError}
-    <p class="error-text">Could not load the full value: {loadError}. Showing the first part only.</p>
+    <p class="error-text" role="alert">Could not load the full value: {loadError}. Showing the first part only.</p>
   {/if}
   <textarea
     class="text"

@@ -30,6 +30,8 @@
   let query = $state('')
   let index = $state(0)
   let listEl = $state<HTMLDivElement>()
+  const uid = $props.id()
+  const optId = (i: number) => `${uid}-opt-${i}`
 
   let session = $derived(sessions.active)
   let database = $derived(session ? sessions.database(session.sessionId) : '')
@@ -142,16 +144,29 @@
     <div class="input">
       <Icon name="search" size={18} />
       <!-- svelte-ignore a11y_autofocus -->
-      <input type="text" placeholder="What would you like to do?" bind:value={query} onkeydown={onKeydown} autofocus spellcheck="false" />
+      <input
+        type="text"
+        role="combobox"
+        aria-label="Search commands"
+        aria-autocomplete="list"
+        aria-expanded="true"
+        aria-controls="{uid}-list"
+        aria-activedescendant={results[index] ? optId(index) : undefined}
+        placeholder="What would you like to do?"
+        bind:value={query}
+        onkeydown={onKeydown}
+        autofocus
+        spellcheck="false"
+      />
       <kbd>ESC</kbd>
     </div>
-    <div class="list" bind:this={listEl}>
+    <div class="list" id="{uid}-list" role="listbox" aria-label="Results" bind:this={listEl}>
       {#each results as c, i (c.group + c.label + i)}
         {#if i === 0 || results[i - 1].group !== c.group}
-          <div class="group">{c.group}</div>
+          <div class="group" role="presentation">{c.group}</div>
         {/if}
         <!-- svelte-ignore a11y_mouse_events_have_key_events -->
-        <div class="opt" class:on={i === index} data-i={i} role="option" aria-selected={i === index} tabindex="-1" onclick={() => run(c)} onmousemove={() => (index = i)}>
+        <div class="opt" id={optId(i)} class:on={i === index} data-i={i} role="option" aria-selected={i === index} tabindex="-1" onclick={() => run(c)} onmousemove={() => (index = i)}>
           <Icon name={c.icon} size={14} />
           <span>{c.label}</span>
           <small>{c.hint ?? '↵'}</small>

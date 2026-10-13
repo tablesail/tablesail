@@ -22,6 +22,9 @@
 
   let { session, activeTabId }: Props = $props()
 
+  // Ids so each field's input is named by its label.
+  const uid = $props.id()
+
   let query = $state('')
   /** JSON fields shown on one line instead of pretty-printed, by column name. */
   let minified = $state<Record<string, boolean>>({})
@@ -149,7 +152,7 @@
   let last = $derived(samples.length ? samples[samples.length - 1] : null)
 </script>
 
-<aside class="inspector">
+<aside class="inspector" aria-label={inspector.tab === 'assistant' ? 'Assistant' : 'Details'}>
   <div class="ihead">
     <div class="views" role="tablist">
       <button role="tab" aria-selected={inspector.tab === 'details'} class:on={inspector.tab === 'details'} onclick={() => (inspector.tab = 'details')}>Details</button>
@@ -177,12 +180,13 @@
           {@const editableField = canEditField(i)}
           {@const before = valueToEditText(cur.row[i])}
           <div class="field">
-            <div class="label"><span class="lname">{c.name}</span><span class="ltype">{c.typeName}</span></div>
+            <div class="label"><span class="lname" id="{uid}-f{i}">{c.name}</span><span class="ltype">{c.typeName}</span></div>
             <div class="box">
               {#if json !== null && cur.edit?.canEdit(i)}
                 {#key json}
                   <textarea
                     class="value json-edit"
+                    aria-labelledby="{uid}-f{i}"
                     spellcheck="false"
                     rows={Math.min(16, json.split('\n').length)}
                     value={json}
@@ -197,6 +201,7 @@
                   {#if before.length > 60 || before.includes('\n')}
                     <textarea
                       class="value edit"
+                      aria-labelledby="{uid}-f{i}"
                       spellcheck="false"
                       rows={Math.min(8, Math.ceil(before.length / 34) + before.split('\n').length)}
                       value={before}
@@ -206,6 +211,7 @@
                   {:else}
                     <input
                       class="value edit {v.cls}"
+                      aria-labelledby="{uid}-f{i}"
                       type="text"
                       spellcheck="false"
                       value={before}
@@ -218,7 +224,7 @@
               {:else}
                 <div class="value {v.cls}" class:multi={v.text.length > 40 || v.text.includes('\n')}>{v.text || ' '}</div>
               {/if}
-              <button class="more" aria-label="Field options" title="Options" onclick={(e) => fieldMenu(e, i, json ?? v.text, json !== null)}>
+              <button class="more" aria-label="Field options for {c.name}" title="Options" onclick={(e) => fieldMenu(e, i, json ?? v.text, json !== null)}>
                 <Icon name="chevron-down" size={11} strokeWidth={1.8} />
               </button>
             </div>

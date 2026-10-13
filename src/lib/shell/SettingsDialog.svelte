@@ -61,9 +61,9 @@
         <b>Appearance</b>
         <p class="muted">Follow the system, or pick a theme.</p>
       </div>
-      <div class="seg">
+      <div class="seg" role="group" aria-label="Theme">
         {#each MODES as m (m.mode)}
-          <button class:on={theme.mode === m.mode} onclick={() => theme.set(m.mode)}>{m.label}</button>
+          <button class:on={theme.mode === m.mode} aria-pressed={theme.mode === m.mode} onclick={() => theme.set(m.mode)}>{m.label}</button>
         {/each}
       </div>
     </div>

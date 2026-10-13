@@ -33,6 +33,22 @@
     if (t) tabs.select(t.id)
   }
 
+  // Arrow keys / Home / End move the focus along the strip (Enter or Space activates the focused tab).
+  function onStripKey(e: KeyboardEvent) {
+    const cur = (e.target as HTMLElement).closest<HTMLElement>('[role=tab]')
+    if (!cur || !strip) return
+    const all = [...strip.querySelectorAll<HTMLElement>('[role=tab]')]
+    const i = all.indexOf(cur)
+    let next: HTMLElement | undefined
+    if (e.key === 'ArrowRight') next = all[(i + 1) % all.length]
+    else if (e.key === 'ArrowLeft') next = all[(i - 1 + all.length) % all.length]
+    else if (e.key === 'Home') next = all[0]
+    else if (e.key === 'End') next = all[all.length - 1]
+    else return
+    e.preventDefault()
+    next?.focus()
+  }
+
   function onAux(e: MouseEvent, id: string) {
     if (e.button === 1) {
       e.preventDefault()
@@ -50,25 +66,34 @@
       <Icon name="chevron-right" size={14} strokeWidth={1.6} />
     </button>
   </div>
-  <div class="strip" role="tablist" bind:this={strip}>
+  <div class="strip" role="tablist" aria-label="Open tabs" bind:this={strip}>
     {#each list as t (t.id)}
-      <div
-        class="tab"
-        class:active={t.id === activeId}
-        data-tab={t.id}
-        role="tab"
-        aria-selected={t.id === activeId}
-        tabindex="-1"
-        title={t.kind === 'table' ? [t.table.schema, t.table.name].filter(Boolean).join('.') : t.title}
-        onclick={() => tabs.select(t.id)}
-        ondblclick={() => tabs.keep(t.id)}
-        onauxclick={(e) => onAux(e, t.id)}
-        onmousedown={(e) => e.button === 1 && e.preventDefault()}
-        onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && tabs.select(t.id)}
-      >
+      <!-- The close button is a sibling of the tab (not inside it) so the tab's name is just its title. -->
+      <div class="item" role="presentation">
+        <div
+          class="tab"
+          class:active={t.id === activeId}
+          data-tab={t.id}
+          role="tab"
+          aria-selected={t.id === activeId}
+          tabindex={t.id === activeId ? 0 : -1}
+          title={t.kind === 'table' ? [t.table.schema, t.table.name].filter(Boolean).join('.') : t.title}
+          onclick={() => tabs.select(t.id)}
+          ondblclick={() => tabs.keep(t.id)}
+          onauxclick={(e) => onAux(e, t.id)}
+          onmousedown={(e) => e.button === 1 && e.preventDefault()}
+          onkeydown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault()
+              tabs.select(t.id)
+            } else onStripKey(e)
+          }}
+        >
+          <span class="t" class:preview={t.kind === 'table' && t.preview}>{t.title}</span>
+        </div>
         <button
           class="close icon"
-          aria-label="Close tab"
+          aria-label="Close tab {t.title}"
           tabindex="-1"
           onmousedown={(e) => e.preventDefault()}
           onclick={(e) => {
@@ -76,7 +101,6 @@
             tabs.close(t.id)
           }}><Icon name="close" size={9} strokeWidth={1.8} /></button
         >
-        <span class="t" class:preview={t.kind === 'table' && t.preview}>{t.title}</span>
       </div>
     {/each}
   </div>
@@ -84,7 +108,6 @@
     class="add icon"
     title="New query"
     aria-label="New query"
-    tabindex="-1"
     onmousedown={(e) => e.preventDefault()}
     onclick={() => tabs.newQuery(session.sessionId, sessions.database(session.sessionId))}
     ><Icon name="plus" size={14} /></button
@@ -128,10 +151,16 @@
     height: 0;
   }
 
-  .tab {
+  .item {
     position: relative;
     flex: 1 1 0;
     min-width: 110px;
+    display: flex;
+  }
+
+  .tab {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -139,6 +168,17 @@
     border-radius: 6px;
     color: var(--fg-muted);
     font-size: 12.5px;
+    outline: none;
+  }
+
+  .tab:focus-visible {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+
+  .tab.active:focus-visible {
+    box-shadow:
+      0 0 0 2px var(--accent),
+      var(--btn-shadow);
   }
 
   .tab:hover:not(.active) {
@@ -177,7 +217,7 @@
     opacity: 0;
   }
 
-  .tab:hover .close {
+  .item:hover .close {
     opacity: 1;
   }
 
