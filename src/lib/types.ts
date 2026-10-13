@@ -401,4 +401,6 @@ export interface JobProgress {
   done: boolean
   cancelled: boolean
   error: string | null
+  /** Non-fatal note about the finished job (e.g. long values truncated in a query export). */
+  warning?: string | null
 }

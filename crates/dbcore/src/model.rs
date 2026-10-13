@@ -552,4 +552,7 @@ pub struct JobProgress {
     pub done: bool,
     pub cancelled: bool,
     pub error: Option<String>,
+    /// Non-fatal note about the finished job (e.g. long values truncated in a query export).
+    #[serde(default)]
+    pub warning: Option<String>,
 }

@@ -1,7 +1,13 @@
 mod commands;
+mod jobs;
+mod keychain;
+mod runner;
+mod schema;
 mod state;
+mod store;
 
 use state::AppState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -11,6 +17,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
         .setup(|app| {
+            let paths = app.path();
+            app.state::<AppState>()
+                .init(paths.app_config_dir()?, paths.app_cache_dir()?);
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()

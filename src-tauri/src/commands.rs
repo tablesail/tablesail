@@ -2,16 +2,25 @@
 //! `src/lib/api.ts`; argument names are camelCase on the JS side.
 //! Errors serialize as `{ kind, message, code, statement }` (dbcore::Error).
 
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use dbcore::driver::CursorEvent;
+use dbcore::export::{export, import_csv};
 use dbcore::model::{
     ApplyResult, BrowseRequest, ChangeSet, ColumnValue, ConnectionConfig, CsvImport, CsvPreview,
-    ExportFormat, ExportSource, JobProgress, Page, RowCount, SchemaSnapshot, Secrets,
-    StatementSpan, TableInfo, TableRef, TableStructure,
+    ExportFormat, ExportSource, Filter, FilterOp, JobProgress, Page, RowCount, SchemaSnapshot,
+    Secrets, StatementKind, StatementSpan, TableInfo, TableRef, TableStructure,
 };
-use dbcore::{Engine, Error, Value};
+use dbcore::{Engine, Error, Session, Value};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
+use crate::jobs::{self, Job};
+use crate::runner::{OpenFn, RunningQuery};
 use crate::state::AppState;
+use crate::{keychain, schema, store};
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -99,6 +108,40 @@ pub struct RowsPage {
     pub complete: bool,
 }
 
+// --- helpers -----------------------------------------------------------------
+
+/// Connecting includes SSH and TLS handshakes; each has its own timeout, this is the backstop.
+const CONNECT_BUDGET: Duration = Duration::from_secs(60);
+
+const READ_ONLY: &str = "This connection is read-only.";
+
+fn new_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
+async fn open_session(config: ConnectionConfig, secrets: Secrets) -> Result<Session> {
+    tokio::time::timeout(CONNECT_BUDGET, Session::open(config, secrets))
+        .await
+        .map_err(|_| Error::Connection("timed out".into()))?
+}
+
+fn writable(session: &Session) -> Result<()> {
+    if session.config.read_only {
+        Err(Error::InvalidInput(READ_ONLY.into()))
+    } else {
+        Ok(())
+    }
+}
+
+fn session_info(session: &Session, session_id: &str, databases: Vec<String>) -> SessionInfo {
+    SessionInfo {
+        session_id: session_id.to_owned(),
+        config: session.config.clone(),
+        server_version: session.server_version.clone(),
+        databases,
+    }
+}
+
 // --- app -------------------------------------------------------------------
 
 #[tauri::command]
@@ -113,7 +156,7 @@ pub fn app_info() -> CoreInfo {
 
 #[tauri::command]
 pub async fn connections_list(state: State<'_, AppState>) -> Result<Vec<ConnectionConfig>> {
-    todo!("A3 {:p}", &state)
+    store::load(&state.paths()?.config_dir).await
 }
 
 /// Saves (creates when `config.id` is empty). `secrets` None keeps stored secrets;
@@ -124,12 +167,49 @@ pub async fn connection_save(
     config: ConnectionConfig,
     secrets: Option<Secrets>,
 ) -> Result<ConnectionConfig> {
-    todo!("A3 {:p} {config:?} {secrets:?}", &state)
+    let mut config = config;
+    config.name = config.name.trim().to_owned();
+    if config.name.is_empty() {
+        return Err(Error::InvalidInput("Give the connection a name.".into()));
+    }
+    if config.engine == Engine::Sqlite && config.file_path.as_deref().is_none_or(str::is_empty) {
+        return Err(Error::InvalidInput("Choose a SQLite database file.".into()));
+    }
+    if config.id.trim().is_empty() {
+        config.id = new_id();
+    }
+
+    let dir = &state.paths()?.config_dir;
+    let _guard = state.connections_lock.lock().await;
+    let mut connections = store::load(dir).await?;
+    // Secrets first: if the keychain refuses, nothing half-saved is left behind.
+    if let Some(secrets) = &secrets {
+        keychain::store(&config.id, secrets).await?;
+    }
+    match connections.iter_mut().find(|c| c.id == config.id) {
+        Some(slot) => *slot = config.clone(),
+        None => connections.push(config.clone()),
+    }
+    store::save(dir, &connections).await?;
+    Ok(config)
 }
 
 #[tauri::command]
 pub async fn connection_delete(state: State<'_, AppState>, id: String) -> Result<()> {
-    todo!("A3 {:p} {id}", &state)
+    let paths = state.paths()?;
+    {
+        let _guard = state.connections_lock.lock().await;
+        let mut connections = store::load(&paths.config_dir).await?;
+        let before = connections.len();
+        connections.retain(|c| c.id != id);
+        if connections.len() != before {
+            store::save(&paths.config_dir, &connections).await?;
+        }
+    }
+    state.close_session(&id).await;
+    keychain::delete_all(&id).await;
+    schema::remove_cache(&paths.cache_dir, &id).await;
+    Ok(())
 }
 
 /// Connects (through SSH if configured), reads the version, disconnects.
@@ -140,7 +220,16 @@ pub async fn connection_test(
     config: ConnectionConfig,
     secrets: Option<Secrets>,
 ) -> Result<TestResult> {
-    todo!("A3 {:p} {config:?} {secrets:?}", &state)
+    let _ = &state;
+    let secrets = keychain::merge(keychain::load(&config).await, secrets);
+    let started = Instant::now();
+    let session = open_session(config, secrets).await?;
+    let result = TestResult {
+        server_version: session.server_version.clone(),
+        elapsed_ms: started.elapsed().as_millis() as u64,
+    };
+    session.close().await;
+    Ok(result)
 }
 
 /// Opens (or returns the already open) session for a saved connection.
@@ -151,12 +240,42 @@ pub async fn connection_open(
     id: String,
     secrets: Option<Secrets>,
 ) -> Result<SessionInfo> {
-    todo!("A3 {:p} {id} {secrets:?}", &state)
+    let open_lock = state.open_lock(&id);
+    let _opening = open_lock.lock().await;
+
+    if let Some(session) = state.find_session(&id) {
+        match session.driver.list_databases().await {
+            Ok(databases) => return Ok(session_info(&session, &id, databases)),
+            Err(_) => {
+                // The connection died while idle: reconnect instead of returning a corpse.
+                drop(session);
+                state.close_session(&id).await;
+            }
+        }
+    }
+
+    let config = store::load(&state.paths()?.config_dir)
+        .await?
+        .into_iter()
+        .find(|c| c.id == id)
+        .ok_or_else(|| Error::NotFound("This connection no longer exists.".into()))?;
+    let secrets = keychain::merge(keychain::load(&config).await, secrets);
+    let session = open_session(config, secrets).await?;
+    let databases = match session.driver.list_databases().await {
+        Ok(databases) => databases,
+        Err(e) => {
+            session.close().await;
+            return Err(e);
+        }
+    };
+    let session = state.insert_session(id.clone(), session);
+    Ok(session_info(&session, &id, databases))
 }
 
 #[tauri::command]
 pub async fn connection_close(state: State<'_, AppState>, session_id: String) -> Result<()> {
-    todo!("A3 {:p} {session_id}", &state)
+    state.close_session(&session_id).await;
+    Ok(())
 }
 
 // --- schema ------------------------------------------------------------------
@@ -166,7 +285,7 @@ pub async fn schema_databases(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<Vec<String>> {
-    todo!("A3 {:p} {session_id}", &state)
+    state.session(&session_id)?.driver.list_databases().await
 }
 
 #[tauri::command]
@@ -175,7 +294,11 @@ pub async fn schema_schemas(
     session_id: String,
     database: String,
 ) -> Result<Vec<String>> {
-    todo!("A3 {:p} {session_id} {database}", &state)
+    state
+        .session(&session_id)?
+        .driver
+        .list_schemas(&database)
+        .await
 }
 
 #[tauri::command]
@@ -185,7 +308,11 @@ pub async fn schema_tables(
     database: String,
     schema: Option<String>,
 ) -> Result<Vec<TableInfo>> {
-    todo!("A3 {:p} {session_id} {database} {schema:?}", &state)
+    state
+        .session(&session_id)?
+        .driver
+        .list_tables(&database, schema.as_deref())
+        .await
 }
 
 /// Tables and column names of a whole database. `refresh` false returns the
@@ -198,7 +325,15 @@ pub async fn schema_snapshot(
     database: String,
     refresh: bool,
 ) -> Result<SchemaSnapshot> {
-    todo!("A3 {:p} {session_id} {database} {refresh}", &state)
+    let session = state.session(&session_id)?;
+    schema::snapshot(
+        &state.paths()?.cache_dir,
+        &session_id,
+        &session.driver,
+        &database,
+        refresh,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -207,7 +342,11 @@ pub async fn table_structure(
     session_id: String,
     table: TableRef,
 ) -> Result<TableStructure> {
-    todo!("A3 {:p} {session_id} {table:?}", &state)
+    state
+        .session(&session_id)?
+        .driver
+        .table_structure(&table)
+        .await
 }
 
 // --- browsing ----------------------------------------------------------------
@@ -220,7 +359,11 @@ pub async fn browse_page(
     offset: u64,
     limit: u32,
 ) -> Result<Page> {
-    todo!("A3 {:p} {session_id} {request:?} {offset} {limit}", &state)
+    state
+        .session(&session_id)?
+        .driver
+        .browse_page(&request, offset, limit)
+        .await
 }
 
 #[tauri::command]
@@ -229,7 +372,11 @@ pub async fn browse_count(
     session_id: String,
     request: BrowseRequest,
 ) -> Result<RowCount> {
-    todo!("A3 {:p} {session_id} {request:?}", &state)
+    state
+        .session(&session_id)?
+        .driver
+        .count_rows(&request)
+        .await
 }
 
 /// Full (untruncated) value of one cell, located by primary key.
@@ -241,7 +388,52 @@ pub async fn cell_fetch(
     key: Vec<ColumnValue>,
     column: String,
 ) -> Result<Value> {
-    todo!("A3 {:p} {session_id} {table:?} {key:?} {column}", &state)
+    if key.is_empty() {
+        return Err(Error::InvalidInput(
+            "This row has no primary key, so the cell cannot be located.".into(),
+        ));
+    }
+    let driver = state.session(&session_id)?.driver.clone();
+    let request = BrowseRequest {
+        table,
+        filters: key
+            .iter()
+            .map(|k| match &k.value {
+                Value::Null => Filter {
+                    column: k.column.clone(),
+                    op: FilterOp::IsNull,
+                    value: None,
+                },
+                value => Filter {
+                    column: k.column.clone(),
+                    op: FilterOp::Eq,
+                    value: Some(value.to_display()),
+                },
+            })
+            .collect(),
+        match_all: true,
+        raw_where: None,
+        sort: Vec::new(),
+        columns: vec![column],
+    };
+    // browse_all (not browse_page) returns complete values; the cursor is dropped
+    // after the first row, which stops the statement.
+    let mut cursor = driver.browse_all(&request).await?;
+    loop {
+        match cursor.next(1).await? {
+            None => return Err(Error::NotFound("The row no longer exists.".into())),
+            Some(CursorEvent::Rows(rows)) => {
+                if let Some(mut row) = rows.into_iter().next() {
+                    return Ok(if row.is_empty() {
+                        Value::Null
+                    } else {
+                        row.swap_remove(0)
+                    });
+                }
+            }
+            Some(_) => {}
+        }
+    }
 }
 
 // --- SQL editor --------------------------------------------------------------
@@ -261,12 +453,37 @@ pub async fn query_run(
     database: Option<String>,
     sql: String,
 ) -> Result<QueryRun> {
-    todo!("A3 {:p} {session_id} {database:?} {sql}", &state)
+    let session = state.session(&session_id)?;
+    let driver = session.driver.clone();
+    let statements = dbcore::split::split_statements(&sql, driver.dialect());
+    if statements.is_empty() {
+        return Err(Error::InvalidInput("There is no SQL to run.".into()));
+    }
+    if session.config.read_only && statements.iter().any(|s| s.kind != StatementKind::Read) {
+        return Err(Error::InvalidInput(READ_ONLY.into()));
+    }
+
+    let open: OpenFn = Arc::new(move |statement: String| {
+        let driver = driver.clone();
+        let database = database.clone();
+        Box::pin(async move { driver.query(database.as_deref(), &statement).await })
+    });
+    let query_id = new_id();
+    state.add_query(RunningQuery::start(
+        query_id.clone(),
+        session_id,
+        open,
+        &statements,
+    ));
+    Ok(QueryRun {
+        query_id,
+        statements,
+    })
 }
 
 #[tauri::command]
 pub async fn query_status(state: State<'_, AppState>, query_id: String) -> Result<QueryStatus> {
-    todo!("A3 {:p} {query_id}", &state)
+    Ok(state.query(&query_id)?.status())
 }
 
 /// Rows `[offset, offset + limit)` of one result set. Waits (up to ~5 s) until
@@ -281,21 +498,23 @@ pub async fn query_fetch(
     offset: u64,
     limit: u32,
 ) -> Result<RowsPage> {
-    todo!(
-        "A3 {:p} {query_id} {statement_index} {set_index} {offset} {limit}",
-        &state
-    )
+    let query = state.query(&query_id)?;
+    query.fetch(statement_index, set_index, offset, limit).await
 }
 
 #[tauri::command]
 pub async fn query_cancel(state: State<'_, AppState>, query_id: String) -> Result<()> {
-    todo!("A3 {:p} {query_id}", &state)
+    state.query(&query_id)?.cancel().await;
+    Ok(())
 }
 
 /// Frees a query's buffers and connection.
 #[tauri::command]
 pub async fn query_close(state: State<'_, AppState>, query_id: String) -> Result<()> {
-    todo!("A3 {:p} {query_id}", &state)
+    if let Some(query) = state.remove_query(&query_id) {
+        query.cancel().await;
+    }
+    Ok(())
 }
 
 // --- editing -----------------------------------------------------------------
@@ -306,7 +525,11 @@ pub async fn changes_preview(
     session_id: String,
     changes: ChangeSet,
 ) -> Result<Vec<String>> {
-    todo!("A3 {:p} {session_id} {changes:?}", &state)
+    state
+        .session(&session_id)?
+        .driver
+        .preview_changes(&changes)
+        .await
 }
 
 #[tauri::command]
@@ -315,7 +538,9 @@ pub async fn changes_apply(
     session_id: String,
     changes: ChangeSet,
 ) -> Result<ApplyResult> {
-    todo!("A3 {:p} {session_id} {changes:?}", &state)
+    let session = state.session(&session_id)?;
+    writable(&session)?;
+    session.driver.apply_changes(&changes).await
 }
 
 // --- export / import (background jobs) ---------------------------------------
@@ -328,7 +553,25 @@ pub async fn export_start(
     format: ExportFormat,
     path: String,
 ) -> Result<String> {
-    todo!("A3 {:p} {session_id} {source:?} {format:?} {path}", &state)
+    if path.trim().is_empty() {
+        return Err(Error::InvalidInput("Choose a file to export to.".into()));
+    }
+    let driver = state.session(&session_id)?.driver.clone();
+    let job = Job::new();
+    let job_id = new_id();
+    jobs::spawn(
+        job.clone(),
+        export(
+            driver,
+            source,
+            format,
+            PathBuf::from(path),
+            job.progress_fn(),
+            job.cancel.clone(),
+        ),
+    );
+    state.add_job(job_id.clone(), job);
+    Ok(job_id)
 }
 
 #[tauri::command]
@@ -342,15 +585,26 @@ pub async fn import_start(
     session_id: String,
     import: CsvImport,
 ) -> Result<String> {
-    todo!("A3 {:p} {session_id} {import:?}", &state)
+    let session = state.session(&session_id)?;
+    writable(&session)?;
+    let driver = session.driver.clone();
+    let job = Job::new();
+    let job_id = new_id();
+    jobs::spawn(
+        job.clone(),
+        import_csv(driver, import, job.progress_fn(), job.cancel.clone()),
+    );
+    state.add_job(job_id.clone(), job);
+    Ok(job_id)
 }
 
 #[tauri::command]
 pub async fn job_status(state: State<'_, AppState>, job_id: String) -> Result<JobProgress> {
-    todo!("A3 {:p} {job_id}", &state)
+    Ok(state.job(&job_id)?.snapshot())
 }
 
 #[tauri::command]
 pub async fn job_cancel(state: State<'_, AppState>, job_id: String) -> Result<()> {
-    todo!("A3 {:p} {job_id}", &state)
+    state.job(&job_id)?.cancel.cancel();
+    Ok(())
 }
