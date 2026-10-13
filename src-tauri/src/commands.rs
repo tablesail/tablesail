@@ -63,8 +63,11 @@ pub struct ResultSetStatus {
     pub columns: Vec<dbcore::model::ColumnMeta>,
     /// Rows buffered so far.
     pub loaded: u64,
-    /// The server has sent every row.
+    /// The server has sent every row (or reading stopped, see `truncated`).
     pub complete: bool,
+    /// Reading stopped early: a non-final statement of a script is read up to
+    /// 10,000 rows and then closed so it doesn't hold a connection.
+    pub truncated: bool,
 }
 
 #[derive(Serialize, Clone)]

@@ -3,6 +3,7 @@
 pub mod mongo;
 pub mod mysql;
 pub mod postgres;
+pub mod sqlcommon;
 pub mod sqlite;
 
 use std::sync::Arc;

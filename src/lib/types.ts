@@ -339,6 +339,8 @@ export interface ResultSetStatus {
   columns: ColumnMeta[]
   loaded: number
   complete: boolean
+  /** non-final statements of a script are read up to 10,000 rows, then closed */
+  truncated: boolean
 }
 
 export interface StatementStatus {
