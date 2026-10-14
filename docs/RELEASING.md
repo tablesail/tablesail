@@ -1,37 +1,30 @@
 # Releasing TableSail
 
-Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
-It builds macOS (Apple Silicon and Intel), Windows and Linux bundles, signs the
-updater artifacts, and attaches everything plus `latest.json` to a **draft**
-GitHub Release.
+Installers are built on GitHub, never on a developer machine. There are two ways to get
+them:
 
-## One-time setup
+| Want | Use |
+|---|---|
+| A quick installer to try, no release | **Build installers** (`build.yml`), run by hand |
+| A published version people download | **Release** (`release.yml`), run by pushing a `v*` tag |
 
-1. **Updater keys.** Generate a signing key pair:
+Both build macOS (Apple Silicon and Intel), Windows and Linux in parallel.
 
-   ```sh
-   npx tauri signer generate -w ~/.tauri/tablesail.key
-   ```
+## Quick installer, no release
 
-   Keep the private key and its password safe. Losing them means installed apps
-   can no longer verify updates.
-2. **Public key.** Paste the contents of `tablesail.key.pub` into
-   `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`, replacing
-   `REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY`.
-3. **Repository secrets** (Settings, Secrets and variables, Actions):
-   - `TAURI_SIGNING_PRIVATE_KEY`: contents of the private key file
-   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
-4. **Endpoint.** In `src-tauri/tauri.conf.json` replace `OWNER/REPO` in
-   `plugins.updater.endpoints` with your GitHub repository (for example
-   `acme/tablesail`). Do the same for the download links in `site/index.html`.
-5. **Optional, macOS signing and notarization.** Without these, macOS builds are
-   unsigned and users must right-click, Open the first time. Add secrets
-   `APPLE_CERTIFICATE` (base64 of the Developer ID .p12), `APPLE_CERTIFICATE_PASSWORD`,
-   `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an app-specific
-   password) and `APPLE_TEAM_ID`. The workflow passes them through; empty values
-   are ignored.
+1. Actions tab, **Build installers**, **Run workflow**, pick the branch.
+   Or: `gh workflow run build.yml`
+2. Wait for the four jobs (`gh run watch`). A cold cache takes 15 to 25 minutes per
+   platform; later runs reuse the Rust cache and are faster.
+3. Download the artifacts from the run page, or `gh run download --dir installers`.
 
-Windows builds are unsigned unless you add your own code-signing setup.
+What comes out: a `.dmg` per Mac architecture, a Windows `.exe` (NSIS) installer, and a
+`.deb` plus `.AppImage` for Linux. They are unsigned: no updater signature, and macOS gets
+only an ad-hoc signature. Artifacts are kept for 14 days.
+
+macOS minutes count 10 times and Windows minutes 2 times against a private repository's
+free allowance, which is why this workflow is manual. Public repositories have unlimited
+free minutes on GitHub-hosted runners.
 
 ## Cutting a release
 
@@ -40,24 +33,71 @@ Windows builds are unsigned unless you add your own code-signing setup.
    - `src-tauri/tauri.conf.json` (`version`)
    - `Cargo.toml` (`[workspace.package] version`)
 2. Run `cargo check` so `Cargo.lock` updates, and commit.
-3. Tag and push:
+3. Make sure CI is green on that commit.
+4. Tag and push:
 
    ```sh
    git tag v0.2.0
    git push origin main v0.2.0
    ```
-4. Wait for the Release workflow to finish on all four matrix jobs.
-5. Open the draft release on GitHub, check the assets (dmg, msi, nsis exe,
-   AppImage, deb, `.sig` files and `latest.json`), write the notes and publish.
+5. Wait for the Release workflow to finish on all four jobs. It stops at once if the tag
+   does not match `package.json`.
+6. Open the draft release on GitHub, check the assets, write the notes and publish.
+
+Without the signing key below, the release still builds and attaches the installers, but
+without `latest.json`, so installed apps are not offered updates.
+
+## One-time setup for auto-update
+
+1. **Updater keys.** Generate a signing key pair:
+
+   ```sh
+   npx tauri signer generate -w ~/.tauri/tablesail.key
+   ```
+
+   Keep the private key and its password safe. Losing them means installed apps can no
+   longer verify updates.
+2. **Public key.** Paste the contents of `tablesail.key.pub` into
+   `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`, replacing
+   `REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY`. The app verifies every downloaded update against
+   this key, so set it before the first release that should auto-update.
+3. **Repository secrets** (Settings, Secrets and variables, Actions):
+   - `TAURI_SIGNING_PRIVATE_KEY`: contents of the private key file
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
+4. **Optional, macOS signing and notarization.** Without these, macOS builds are unsigned
+   and users must clear the quarantine flag or right-click, Open the first time. Add
+   secrets `APPLE_CERTIFICATE` (base64 of the Developer ID .p12),
+   `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD` (an
+   app-specific password) and `APPLE_TEAM_ID`. The workflow passes them through; empty
+   values are ignored. Set them together with the updater key: a release without the
+   updater key is built with `src-tauri/unsigned.conf.json`, which signs ad hoc.
+
+Windows builds are unsigned unless you add your own code-signing setup. The Windows
+installer is NSIS only; the MSI target is left out until WiX is confirmed to work on the
+current Windows runner image.
 
 ## How the auto-updater works
 
 The app checks `plugins.updater.endpoints`, which points at
-`https://github.com/OWNER/REPO/releases/latest/download/latest.json`. GitHub
-redirects `latest` to the newest **published, non-draft, non-prerelease**
-release, so users only see an update once you publish the draft.
+`https://github.com/tablesail/tablesail/releases/latest/download/latest.json`. GitHub
+redirects `latest` to the newest **published, non-draft, non-prerelease** release, so users
+only see an update once you publish the draft. The repository must be public for people
+outside the organisation to reach that URL.
 
-`latest.json` is generated by tauri-action (`includeUpdaterJson`) and lists, per
-platform, the download URL and the signature. The app downloads the bundle,
-verifies the signature against the embedded `pubkey`, and installs it. Windows
-updates use `installMode: passive` (a progress window, no prompts).
+`latest.json` is generated by tauri-action (`includeUpdaterJson`) and lists, per platform,
+the download URL and the signature. The app downloads the bundle, verifies the signature
+against the embedded `pubkey`, and installs it. Windows updates use `installMode: passive`
+(a progress window, no prompts).
+
+## If a build fails
+
+Reproduce the gates first: `npm run ci` runs the same stages as `ci.yml`. Bundling is the
+one thing that only runs on GitHub, so read the failing job's log. Usual causes:
+
+- **Linux:** a missing system package. The list lives in
+  `.github/actions/linux-deps/action.yml`, shared by every Linux job.
+- **"A public key has been found, but no private key":** a build that creates updater
+  artifacts ran without `TAURI_SIGNING_PRIVATE_KEY`. Pass
+  `--config src-tauri/unsigned.conf.json`, as `build.yml` does.
+- **The `dist` folder is missing:** the Tauri crate embeds `dist/` at compile time. The Rust
+  stages of `scripts/ci.sh` create a placeholder; `npm run build` makes the real one.

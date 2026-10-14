@@ -1,11 +1,19 @@
 name: Release
 
+# Push a v* tag. Builds every platform and attaches the installers to a draft GitHub Release.
+# With the TAURI_SIGNING_PRIVATE_KEY secret set the updater artifacts and latest.json are
+# produced too; without it the release still builds, just without auto-update.
+# One-time setup and steps: docs/RELEASING.md
+
 on:
   push:
     tags: ['v*']
 
 permissions:
   contents: write
+
+env:
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   release:
@@ -17,24 +25,50 @@ jobs:
           - name: macOS (Apple Silicon)
             os: macos-latest
             target: aarch64-apple-darwin
+            bundles: app,dmg
           - name: macOS (Intel)
             os: macos-latest
             target: x86_64-apple-darwin
+            bundles: app,dmg
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            bundles: nsis
           - name: Linux
             os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
+      - name: Tag matches package.json
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev
+          want="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json ($want). Bump the version first (docs/RELEASING.md)."
+            exit 1
+          fi
+
+      - name: Signing mode
+        id: sign
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -n "$KEY" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "extra=" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "extra=--config src-tauri/unsigned.conf.json" >> "$GITHUB_OUTPUT"
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: building without updater artifacts."
+          fi
+
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-deps
 
       - uses: actions/setup-node@v5
         with:
@@ -47,11 +81,9 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: '. -> target'
           key: ${{ matrix.target }}
 
-      # Apple signing and notarization run only when the secrets exist: tauri
-      # skips them when the variables are empty.
+      # Apple signing and notarization run only when the APPLE_* secrets exist.
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -69,5 +101,5 @@ jobs:
           releaseBody: See the assets below to download TableSail for your platform.
           releaseDraft: true
           prerelease: false
-          includeUpdaterJson: true
-          args: --target ${{ matrix.target }}
+          includeUpdaterJson: ${{ steps.sign.outputs.signed == 'true' }}
+          args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }} ${{ steps.sign.outputs.extra }}

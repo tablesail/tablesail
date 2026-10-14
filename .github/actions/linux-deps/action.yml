@@ -1,0 +1,12 @@
+name: Linux build dependencies
+description: The system libraries Tauri (WebKitGTK) needs to compile and bundle on Ubuntu.
+runs:
+  using: composite
+  steps:
+    - name: apt install
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential pkg-config file patchelf \
+          libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev

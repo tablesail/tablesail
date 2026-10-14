@@ -2,7 +2,8 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from '@playwright/test'
 
 // E2E suite: drives the whole UI in a normal browser against the dev-only Tauri mock
-// (src/dev/mockTauri.ts). Uses the installed Google Chrome, so no browsers are downloaded.
+// (src/dev/mockTauri.ts). Uses the installed Google Chrome, so no browsers are downloaded
+// (CI installs it with `npx playwright install chrome`).
 // Port 5181 is reserved for this suite (5173 and 5180 belong to other dev servers).
 const PORT = 5181
 
@@ -18,7 +19,8 @@ export default defineConfig({
   expect: { timeout: 7_000 },
   use: {
     baseURL: `http://localhost:${PORT}`,
-    channel: 'chrome',
+    // PLAYWRIGHT_CHANNEL=chromium runs Playwright's own Chromium (the only build on Linux arm64).
+    channel: process.env.PLAYWRIGHT_CHANNEL || 'chrome',
     headless: true,
     launchOptions: {
       args: ['--disable-breakpad', '--disable-crash-reporter'],

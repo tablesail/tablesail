@@ -1,0 +1,103 @@
+name: Build installers
+
+# Builds unsigned installers on GitHub and attaches them to the run as artifacts.
+# Manual: Actions tab, "Build installers", Run workflow (or `gh workflow run build.yml`).
+# It is not automatic on purpose: macOS minutes count 10x and Windows 2x against a private
+# repo's free allowance. Releases (a v* tag) are built by release.yml.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  bundle:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            artifact: TableSail-macos-apple-silicon
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+            upload: |
+              target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          - name: macOS (Intel)
+            artifact: TableSail-macos-intel
+            os: macos-latest
+            target: x86_64-apple-darwin
+            bundles: dmg
+            upload: |
+              target/x86_64-apple-darwin/release/bundle/dmg/*.dmg
+          - name: Windows
+            artifact: TableSail-windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+            upload: |
+              target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          - name: Linux
+            artifact: TableSail-linux
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+            upload: |
+              target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+              target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-deps
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      # unsigned.conf.json: no updater signing key here, and macOS gets an ad-hoc signature.
+      - name: Build
+        run: >-
+          npx tauri build
+          --target ${{ matrix.target }}
+          --bundles ${{ matrix.bundles }}
+          --config src-tauri/unsigned.conf.json
+
+      - name: List what was built
+        run: |
+          {
+            echo "### ${{ matrix.name }}"
+            echo '```'
+            ls -lh ${{ matrix.upload }} 2>&1 || true
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.upload }}
+          if-no-files-found: error
+          retention-days: 14
