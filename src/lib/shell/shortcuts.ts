@@ -1,3 +1,5 @@
+import { openSqlFile, saveTab, saveTabAs } from '../editor/sqlFiles'
+import { finishTx } from '../editor/transaction'
 import { sessions } from '../stores/sessions.svelte'
 import { tabs } from '../stores/tabs.svelte'
 import { theme } from '../stores/theme.svelte'
@@ -57,6 +59,28 @@ export function handleShortcut(e: KeyboardEvent): boolean {
   }
   if (lower === 'p' && !e.shiftKey) {
     ui.palette = true
+    return true
+  }
+
+  // SQL files and manual transactions. Only claimed where they apply, so ⌘S still commits a table's
+  // pending changes (TableView). On a query tab ⌘S writes its file, or asks where to put one.
+  // A held key (auto-repeat) is swallowed rather than stacking dialogs / repeating the action.
+  const tab = tabs.active(sid)
+  const query = tab?.kind === 'query' ? tab : null
+  if (lower === 'o' && !e.shiftKey) {
+    const session = sessions.active
+    if (!session) return false
+    if (!e.repeat) void openSqlFile(session)
+    return true
+  }
+  if (lower === 's' && query) {
+    if (!e.repeat) void (e.shiftKey ? saveTabAs(query) : saveTab(query))
+    return true
+  }
+  // ⌘⇧C is "copy with headers" while a data grid has the focus (a query result), so it must never commit from there.
+  const copyInGrid = lower === 'c' && !!(e.target as Element | null)?.closest?.('[role="grid"]')
+  if (e.shiftKey && (lower === 'c' || lower === 'r') && query?.txId && !copyInGrid) {
+    if (!e.repeat) void finishTx(query, lower === 'c' ? 'commit' : 'rollback')
     return true
   }
   if (/^[1-9]$/.test(key) && !e.shiftKey) {

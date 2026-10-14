@@ -48,7 +48,7 @@ export function newConfig(engine: Engine = 'postgres'): ConnectionConfig {
 
 export function describeConnection(c: ConnectionConfig): string {
   if (c.engine === 'sqlite') return c.filePath ?? ''
-  if (c.engine === 'mongodb' && c.url) return c.url.replace(/\/\/[^@/]*@/, '//')
+  if (c.engine === 'mongodb' && c.url) return c.url.replace(/\/\/[^/?#]*@/, '//')
   const db = c.database ? `/${c.database}` : ''
   return `${c.user ? c.user + '@' : ''}${c.host}:${c.port}${db}`
 }

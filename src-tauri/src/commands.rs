@@ -11,14 +11,17 @@ use dbcore::export::{export, import_csv};
 use dbcore::model::{
     ApplyResult, BrowseRequest, ChangeSet, ColumnValue, ConnectionConfig, CsvImport, CsvPreview,
     ExportFormat, ExportSource, Filter, FilterOp, JobProgress, Page, RowCount, SchemaSnapshot,
-    Secrets, StatementKind, StatementSpan, TableInfo, TableRef, TableStructure,
+    Secrets, SqlImport, StatementKind, StatementSpan, TableAction, TableInfo, TableRef,
+    TableStructure,
 };
+use dbcore::sqlimport::run_sql_import;
+use dbcore::transaction::ScriptConnection;
 use dbcore::{Engine, Error, Session, Value};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::jobs::{self, Job};
-use crate::runner::{OpenFn, RunningQuery};
+use crate::runner::{OpenFn, RunOptions, RunningQuery};
 use crate::state::AppState;
 use crate::{keychain, schema, store};
 
@@ -113,7 +116,7 @@ pub struct RowsPage {
 /// Connecting includes SSH and TLS handshakes; each has its own timeout, this is the backstop.
 const CONNECT_BUDGET: Duration = Duration::from_secs(60);
 
-const READ_ONLY: &str = "This connection is read-only.";
+const READ_ONLY: &str = dbcore::error::READ_ONLY;
 
 fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
@@ -446,22 +449,51 @@ pub fn sql_split(sql: String, engine: Engine) -> Vec<StatementSpan> {
 /// Splits `sql` and runs the statements one after another in the background.
 /// Execution stops at the first error. Rejected with InvalidInput on a
 /// read-only connection when any statement is not a Read.
+///
+/// `tx_id` runs the statements inside that manual transaction (it must belong to the session),
+/// on its dedicated connection. Without it, a script that controls transactions itself (BEGIN,
+/// COMMIT, SAVEPOINT …) gets a connection of its own for the whole run, closed afterwards with
+/// whatever transaction it left open rolled back, so "BEGIN; UPDATE …; COMMIT;" is atomic.
 #[tauri::command]
 pub async fn query_run(
     state: State<'_, AppState>,
     session_id: String,
     database: Option<String>,
     sql: String,
+    tx_id: Option<String>,
 ) -> Result<QueryRun> {
     let session = state.session(&session_id)?;
-    let driver = session.driver.clone();
-    let statements = dbcore::split::split_statements(&sql, driver.dialect());
+    let statements = dbcore::split::split_statements(&sql, session.driver.dialect());
     if statements.is_empty() {
         return Err(Error::InvalidInput("There is no SQL to run.".into()));
     }
     if session.config.read_only && statements.iter().any(|s| s.kind != StatementKind::Read) {
         return Err(Error::InvalidInput(READ_ONLY.into()));
     }
+
+    let mut options = RunOptions::default();
+    let driver = match tx_id {
+        Some(tx_id) => {
+            let tx = state.txs.get(&tx_id, Some(&session_id))?;
+            // A result still being scrolled would hold the connection against this run.
+            state.settle_queries_of_tx(&tx_id).await;
+            options.keep_tx = session.config.engine == Engine::Postgres;
+            options.tx_id = Some(tx_id);
+            tx.driver().clone()
+        }
+        None => {
+            match ScriptConnection::open(&session.driver, database.as_deref(), &statements).await? {
+                Some(script) => {
+                    let driver = script.driver().clone();
+                    options.on_done = Some(Box::new(move || {
+                        Box::pin(async move { script.finish().await })
+                    }));
+                    driver
+                }
+                None => session.driver.clone(),
+            }
+        }
+    };
 
     let open: OpenFn = Arc::new(move |statement: String| {
         let driver = driver.clone();
@@ -474,6 +506,7 @@ pub async fn query_run(
         session_id,
         open,
         &statements,
+        options,
     ));
     Ok(QueryRun {
         query_id,
@@ -515,6 +548,97 @@ pub async fn query_close(state: State<'_, AppState>, query_id: String) -> Result
         query.cancel().await;
     }
     Ok(())
+}
+
+// --- manual transactions -------------------------------------------------------
+
+/// Begins a transaction on a dedicated connection (in `database` when given) and returns its
+/// id. Run statements in it with `query_run(…, txId)`; end it with `tx_commit` or
+/// `tx_rollback`. Closing the connection rolls it back. MongoDB has none.
+#[tauri::command]
+pub async fn tx_begin(
+    state: State<'_, AppState>,
+    session_id: String,
+    database: Option<String>,
+) -> Result<String> {
+    let session = state.session(&session_id)?;
+    let id = state
+        .txs
+        .begin(&session_id, &session.driver, database.as_deref())
+        .await?;
+    // The connection may have been closed while this was connecting; nothing would roll this one back.
+    if state.find_session(&session_id).is_none() {
+        let _ = state.txs.rollback(&id).await;
+        return Err(Error::NotFound("This connection is not open.".into()));
+    }
+    Ok(id)
+}
+
+/// Commits and closes the transaction. When the server refuses (a deferred constraint, a
+/// Postgres transaction that failed earlier, SQLite's "database is locked") the transaction
+/// stays open: retry, or roll it back.
+#[tauri::command]
+pub async fn tx_commit(state: State<'_, AppState>, tx_id: String) -> Result<()> {
+    let tx = state.txs.get(&tx_id, None)?;
+    state.settle_queries_of_tx(&tx_id).await;
+    let result = state.txs.commit(&tx_id).await;
+    if result.is_err() && state.find_session(&tx.session_id).is_none() {
+        // The connection was closed while the commit was running: it is back in the registry
+        // after failing, and nothing would ever roll it back.
+        let _ = state.txs.rollback(&tx_id).await;
+    }
+    result
+}
+
+/// Rolls back and closes the transaction, cancelling whatever is still running in it.
+#[tauri::command]
+pub async fn tx_rollback(state: State<'_, AppState>, tx_id: String) -> Result<()> {
+    state.txs.get(&tx_id, None)?;
+    state.abort_queries_of_tx(&tx_id).await;
+    state.txs.rollback(&tx_id).await
+}
+
+// --- .sql files and table admin ----------------------------------------------
+
+/// A UTF-8 text file for the SQL editor (at most 50 MB).
+#[tauri::command]
+pub async fn file_read_text(path: String) -> Result<String> {
+    dbcore::textfile::read_text(&path).await
+}
+
+/// Replaces the file atomically (temporary file + rename).
+#[tauri::command]
+pub async fn file_write_text(path: String, contents: String) -> Result<()> {
+    dbcore::textfile::write_text(&path, &contents).await
+}
+
+/// Drops, truncates or renames a table (view, collection). `preview` returns the statements
+/// without running them; otherwise they run and the cached schema snapshot of the database is
+/// forgotten, so the sidebar's next read sees the change.
+#[tauri::command]
+pub async fn table_admin(
+    state: State<'_, AppState>,
+    session_id: String,
+    table: TableRef,
+    action: TableAction,
+    preview: bool,
+) -> Result<Vec<String>> {
+    let session = state.session(&session_id)?;
+    writable(&session)?;
+    // The statement waits for every lock an open transaction of this connection holds, and this
+    // is the only way for the user to end it: the dialog would wait for ever.
+    if !preview && !state.txs.ids_of(&session_id).is_empty() {
+        return Err(Error::InvalidInput(
+            "Commit or roll back the open transaction first: it may be holding locks on the table."
+                .into(),
+        ));
+    }
+    let statements =
+        dbcore::tableadmin::table_admin(session.driver.as_ref(), &table, &action, preview).await?;
+    if !preview && let Ok(paths) = state.paths() {
+        schema::remove_snapshot(&paths.cache_dir, &session_id, &table.database).await;
+    }
+    Ok(statements)
 }
 
 // --- editing -----------------------------------------------------------------
@@ -593,6 +717,36 @@ pub async fn import_start(
     jobs::spawn(
         job.clone(),
         import_csv(driver, import, job.progress_fn(), job.cancel.clone()),
+    );
+    state.add_job(job_id.clone(), job);
+    Ok(job_id)
+}
+
+/// Runs a .sql file (a dump) statement by statement as a background job; poll it with
+/// `job_status`. Only reading statements are accepted on a read-only connection (checked per
+/// statement by the runner).
+#[tauri::command]
+pub async fn sql_import_start(
+    state: State<'_, AppState>,
+    session_id: String,
+    spec: SqlImport,
+) -> Result<String> {
+    let session = state.session(&session_id)?;
+    dbcore::sqlimport::check(session.config.engine, &spec).await?;
+    let driver = session.driver.clone();
+    let read_only = session.config.read_only;
+    // Runs on a connection of its own, so closing the session has to cancel it.
+    let job = Job::for_session(&session_id);
+    let job_id = new_id();
+    jobs::spawn(
+        job.clone(),
+        run_sql_import(
+            driver,
+            spec,
+            read_only,
+            job.progress_fn(),
+            job.cancel.clone(),
+        ),
     );
     state.add_job(job_id.clone(), job);
     Ok(job_id)

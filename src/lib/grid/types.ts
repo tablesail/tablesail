@@ -1,4 +1,5 @@
 import type { CellInput, ColumnMeta, Value } from '../types'
+import type { RowFormat } from '../util/rowFormats'
 
 /** Normalised rectangular selection; row/col bounds are inclusive. */
 export interface GridSelection {
@@ -26,4 +27,19 @@ export interface EditorContext {
   height: number
   commit: (input: CellInput, move?: EditMove) => void
   cancel: () => void
+}
+
+/** What DataGrid.copyAs() put on the clipboard. */
+export interface CopyReport {
+  format: RowFormat
+  /** Rows written to the clipboard. */
+  rows: number
+  /** Selected rows that were not loaded and so left out. */
+  skipped: number
+  /** Selected rows past the copy limit, left out. */
+  capped: number
+  /** Cells that only hold the beginning of a long text or binary value. */
+  truncated: number
+  /** False when the clipboard refused the text. */
+  written: boolean
 }

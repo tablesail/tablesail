@@ -37,7 +37,8 @@ export class QueryRunner {
   private token = 0
   private startedAt = 0
 
-  async run(sessionId: string, database: string | null, sql: string) {
+  /** txId: run inside that manual transaction instead of on the connection pool. */
+  async run(sessionId: string, database: string | null, sql: string, txId: string | null = null) {
     await this.close()
     const token = ++this.token
     this.runId++
@@ -47,7 +48,7 @@ export class QueryRunner {
     this.startedAt = performance.now()
     let queryId: string
     try {
-      const run = await api.queryRun(sessionId, database, sql)
+      const run = await api.queryRun(sessionId, database, sql, txId)
       queryId = run.queryId
       if (token !== this.token) {
         void api.queryClose(queryId).catch(() => {})

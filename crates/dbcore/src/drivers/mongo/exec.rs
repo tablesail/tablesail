@@ -422,5 +422,20 @@ async fn execute(ctx: &ExecCtx, op: Op, tx: &EventSender) -> Result<()> {
             ctx.guard(ctx.collection(&collection).drop()).await?;
             emit_vec(vec![doc! { "ok": 1, "dropped": collection }], ctx, tx).await
         }
+        Op::RenameCollection {
+            collection,
+            to,
+            drop_target,
+        } => {
+            // The command takes full namespaces and runs against `admin`.
+            let reply = ctx
+                .guard(ctx.client.database("admin").run_command(doc! {
+                    "renameCollection": format!("{}.{collection}", ctx.database),
+                    "to": format!("{}.{to}", ctx.database),
+                    "dropTarget": drop_target,
+                }))
+                .await?;
+            emit_reply(reply, ctx, tx).await
+        }
     }
 }

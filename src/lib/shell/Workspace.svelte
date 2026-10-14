@@ -5,6 +5,11 @@
 <script lang="ts">
   import Sidebar from '../sidebar/Sidebar.svelte'
   import QueryTab from '../editor/QueryTab.svelte'
+  import CloseTabDialog from '../editor/CloseTabDialog.svelte'
+  import TxPrompt from '../editor/TxPrompt.svelte'
+  import SqlImportDialog from '../dialogs/SqlImportDialog.svelte'
+  import { editorRequests } from '../editor/requests.svelte'
+  import { openTxTab } from '../editor/transaction'
   import TableView from '../table/TableView.svelte'
   import ConsoleLog from './ConsoleLog.svelte'
   import Inspector from './Inspector.svelte'
@@ -12,7 +17,7 @@
   import TopBar from './TopBar.svelte'
   import { inspector } from '../stores/inspector.svelte'
   import { sessions } from '../stores/sessions.svelte'
-  import { tabs } from '../stores/tabs.svelte'
+  import { tabs, type QueryTab as QueryTabState } from '../stores/tabs.svelte'
   import { ui } from '../stores/ui.svelte'
   import { modLabel } from '../util/format'
 
@@ -76,6 +81,30 @@
   let session = $derived(sessions.active)
   let activeTab = $derived(tabs.active(session?.sessionId ?? null))
   let sessionTabs = $derived(session ? tabs.forSession(session.sessionId) : [])
+
+  // Prompts the SQL editor raises (see editor/requests.svelte.ts and tabs.closeRequest).
+  const queryTab = (id: string | null) => tabs.list.find((t): t is QueryTabState => t.id === id && t.kind === 'query')
+  let closing = $derived(queryTab(tabs.closeRequest))
+  let leaving = $derived(queryTab(editorRequests.leaveManual))
+  let importing = $derived.by(() => {
+    const r = editorRequests.sqlImport
+    const s = r ? sessions.list.find((x) => x.sessionId === r.sessionId) : undefined
+    return r && s ? { session: s, path: r.path } : null
+  })
+
+  // A "leave manual mode" question about a transaction that has since ended is moot.
+  $effect(() => {
+    if (editorRequests.leaveManual && !leaving?.txId) editorRequests.leaveManual = null
+  })
+
+  // A disconnect waits for every open transaction of the session to be answered, one tab after the other.
+  let disconnecting = $derived(editorRequests.disconnect ? openTxTab(editorRequests.disconnect) : undefined)
+  $effect(() => {
+    const sid = editorRequests.disconnect
+    if (!sid || disconnecting) return
+    editorRequests.disconnect = null
+    void sessions.close(sid)
+  })
 
   function onResizeDown(e: PointerEvent) {
     const el = e.currentTarget as HTMLElement
@@ -174,6 +203,32 @@
     </div>
   {/if}
 </div>
+
+{#if closing}
+  {#key closing.id}
+    <CloseTabDialog tab={closing} onClose={() => (tabs.closeRequest = null)} />
+  {/key}
+{/if}
+{#if leaving?.txId}
+  {@const tab = leaving}
+  <TxPrompt
+    {tab}
+    action="switch to auto-commit"
+    onDone={() => {
+      tabs.updateQuery(tab.id, { manual: undefined })
+      editorRequests.leaveManual = null
+    }}
+    onCancel={() => (editorRequests.leaveManual = null)}
+  />
+{/if}
+{#if disconnecting}
+  {#key disconnecting.id}
+    <TxPrompt tab={disconnecting} action="disconnect" onDone={() => {}} onCancel={() => (editorRequests.disconnect = null)} />
+  {/key}
+{/if}
+{#if importing}
+  <SqlImportDialog session={importing.session} path={importing.path} onClose={() => (editorRequests.sqlImport = null)} />
+{/if}
 
 <style>
   .workspace {

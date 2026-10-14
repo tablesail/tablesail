@@ -106,9 +106,15 @@ describe('QueryRunner.run: a finished query', () => {
     const b = install({ statements: [span(0, 'SELECT 1'), span(1, 'SELECT 2')] })
     const r = new QueryRunner()
     await r.run('s1', 'app', 'SELECT 1; SELECT 2')
-    expect(b.calls.find((c) => c.command === 'query_run')?.args).toEqual({ sessionId: 's1', database: 'app', sql: 'SELECT 1; SELECT 2' })
+    expect(b.calls.find((c) => c.command === 'query_run')?.args).toEqual({ sessionId: 's1', database: 'app', sql: 'SELECT 1; SELECT 2', txId: null })
     expect(r.queryId).toBe('q1')
     expect(r.statements.map((s) => s.sql)).toEqual(['SELECT 1', 'SELECT 2'])
+  })
+
+  it('runs inside a manual transaction when given its id', async () => {
+    const b = install()
+    await new QueryRunner().run('s1', 'app', 'UPDATE t SET a = 1', 'tx7')
+    expect(b.calls.find((c) => c.command === 'query_run')?.args).toEqual({ sessionId: 's1', database: 'app', sql: 'UPDATE t SET a = 1', txId: 'tx7' })
   })
 
   it('passes a null database through', async () => {

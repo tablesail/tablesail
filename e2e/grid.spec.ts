@@ -432,7 +432,7 @@ test.describe('copy', () => {
   test('the cell context menu lists the editing and copy actions', async ({ page }) => {
     await gridCell(page, 0, 1).click({ button: 'right' })
     const items = (await page.getByRole('menuitem').allTextContents()).map((t) => t.trim())
-    expect(items.map((t) => t.replace(/\s+.*$/, ''))).toEqual(['Edit', 'Set', 'Copy', 'Copy', 'Filter', 'Duplicate', 'Delete'])
+    expect(items.map((t) => t.replace(/\s+.*$/, ''))).toEqual(['Edit', 'Set', 'Copy', 'Copy', 'Copy', 'Paste', 'Filter', 'Duplicate', 'Delete'])
     await page.keyboard.press('Escape')
     await expect(page.getByRole('menu')).toHaveCount(0)
   })

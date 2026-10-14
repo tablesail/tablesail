@@ -1,12 +1,15 @@
 <!-- Create / edit a saved connection. Secrets are sent to the keychain and never stored in the config. -->
 <script lang="ts">
+  import { onMount, tick } from 'svelte'
   import EngineBadge from '../ui/EngineBadge.svelte'
+  import Icon from '../ui/Icon.svelte'
   import Modal from '../ui/Modal.svelte'
   import FilePick from './FilePick.svelte'
   import SshFields from './SshFields.svelte'
   import { api, errorMessage } from '../api'
   import { connections } from '../stores/connections.svelte'
   import type { ConnectionConfig, Engine, Secrets, SshConfig, SslMode, TestResult } from '../types'
+  import { applyConnectionUrl, describeImport, looksLikeUrl, parseConnectionUrl, splitUrlPassword } from '../util/connUrl'
   import { DEFAULT_PORT, ENGINE_LABEL, ENV_TAGS, defaultUser, newConfig } from '../util/env'
   import { basename } from '../util/format'
 
@@ -14,9 +17,11 @@
     initial: ConnectionConfig | null
     onClose: () => void
     onSaved?: (config: ConnectionConfig) => void
+    /** A connection URL to fill the form from as it opens (pasted on the connection list). */
+    fromUrl?: string
   }
 
-  let { initial, onClose, onSaved }: Props = $props()
+  let { initial, onClose, onSaved, fromUrl }: Props = $props()
 
   const engines: Engine[] = ['postgres', 'mysql', 'mariadb', 'sqlite', 'mongodb']
   const sslModes: { value: SslMode; label: string }[] = [
@@ -50,6 +55,25 @@
   let saving = $state(false)
   let saveError = $state<string | null>(null)
 
+  // "Import from URL": a row that opens on demand, plus URLs pasted straight into the host / URL / file fields.
+  let importOpen = $state(false)
+  let importText = $state('')
+  let importError = $state<string | null>(null)
+  let importNote = $state<string | null>(null)
+  let importEl = $state<HTMLInputElement>()
+  let importRow = $state<HTMLDivElement>()
+  let importBtn = $state<HTMLButtonElement>()
+  // The name the last import filled in; a name the person typed is never replaced.
+  let autoName = ''
+
+  $effect(() => {
+    if (importOpen) importEl?.focus()
+  })
+
+  onMount(() => {
+    if (fromUrl) importFrom(fromUrl)
+  })
+
   let isSqlite = $derived(cfg.engine === 'sqlite')
   let isMongo = $derived(cfg.engine === 'mongodb')
   let sslOn = $derived(cfg.ssl.mode !== 'disable')
@@ -60,6 +84,78 @@
     if (cfg.user === defaultUser(prev)) cfg.user = defaultUser(next)
     if (next !== 'sqlite' && !cfg.host) cfg.host = '127.0.0.1'
     cfg.engine = next
+  }
+
+  /** Fills the form from a connection URL. The password goes to the password field (keychain), never into the config. */
+  function importFrom(text: string): boolean {
+    importNote = null
+    const parsed = parseConnectionUrl(text)
+    if (!parsed.ok) {
+      importError = parsed.error
+      return false
+    }
+    const nameFree = !cfg.name.trim() || cfg.name === autoName
+    const { config, password } = applyConnectionUrl($state.snapshot(cfg), parsed.value, { setName: nameFree })
+    Object.assign(cfg, config)
+    if (nameFree && parsed.value.name) autoName = config.name
+    if (password !== null) dbPassword = password
+    testResult = null
+    testError = null
+    importError = null
+    importNote = describeImport(config, password)
+    closeImport()
+    return true
+  }
+
+  /** Any edit retires the import message, except the paste that just produced one. */
+  function onFormInput(e: Event) {
+    if (e.target === importEl && (e as InputEvent).inputType === 'insertFromPaste') return
+    importError = null
+    importNote = null
+  }
+
+  function openImport() {
+    importOpen = true
+    importError = null
+    importNote = null
+  }
+
+  function closeImport() {
+    const hadFocus = !!importRow?.contains(document.activeElement)
+    importOpen = false
+    importText = ''
+    if (hadFocus) void tick().then(() => importBtn?.focus())
+  }
+
+  function onImportKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') {
+      e.stopPropagation() // closes the row, not the dialog
+      closeImport()
+    } else if (e.key === 'Enter' && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault()
+      if (importText.trim()) importFrom(importText)
+    }
+  }
+
+  /** A URL pasted into the import row is applied at once; anything else is pasted as text and explained. */
+  function onImportPaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData('text') ?? ''
+    if (!text.trim()) return
+    const parsed = parseConnectionUrl(text)
+    if (parsed.ok) {
+      e.preventDefault()
+      importFrom(text)
+    } else {
+      importError = parsed.error
+    }
+  }
+
+  /** A URL pasted into the Host, URL or file field fills the whole form instead of landing in that one field. */
+  function onUrlPaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData('text') ?? ''
+    if (!looksLikeUrl(text)) return
+    e.preventDefault()
+    importFrom(text)
   }
 
   function toggleSsh(on: boolean) {
@@ -89,7 +185,8 @@
     } else {
       out.filePath = null
       if (!isMongo) out.url = null
-      else out.url = out.url?.trim() || null
+      // A password typed into the URL travels to the keychain like the Password field's (see buildSecrets).
+      else out.url = out.url?.trim() ? splitUrlPassword(out.url.trim()).url : null
       if (!useSsh || !out.ssh) out.ssh = null
       else if (!useJump) out.ssh.jump = null
     }
@@ -99,7 +196,8 @@
   /** Only fields the user typed; undefined leaves the stored secret untouched. */
   function buildSecrets(): Secrets | null {
     const s: Secrets = {}
-    if (dbPassword && !isSqlite) s.dbPassword = dbPassword
+    const password = dbPassword || (isMongo && cfg.url ? splitUrlPassword(cfg.url.trim()).password : null)
+    if (password && !isSqlite) s.dbPassword = password
     if (useSsh && !isSqlite) {
       if (sshPassword) s.sshPassword = sshPassword
       if (sshPassphrase) s.sshPassphrase = sshPassphrase
@@ -167,7 +265,36 @@
 <svelte:window onkeydown={onKeydown} />
 
 <Modal title={initial?.id ? 'Edit connection' : 'New connection'} {onClose} width="560px" dismissable={!saving}>
-  <div class="form">
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="form" oninput={onFormInput}>
+    {#if importOpen}
+      <div class="import" bind:this={importRow}>
+        <input
+          type="text"
+          aria-label="Import from URL"
+          aria-invalid={importError ? 'true' : undefined}
+          placeholder="postgresql://user:password@host:5432/database"
+          spellcheck="false"
+          autocomplete="off"
+          bind:this={importEl}
+          bind:value={importText}
+          onkeydown={onImportKeydown}
+          onpaste={onImportPaste}
+        />
+        <button type="button" class="primary" disabled={!importText.trim()} onclick={() => importFrom(importText)}>Import</button>
+        <button type="button" class="icon" aria-label="Close URL import" onclick={closeImport}><Icon name="close" size={12} /></button>
+      </div>
+    {:else}
+      <button type="button" class="importbtn" bind:this={importBtn} onclick={openImport}>
+        <Icon name="link" size={12} /> Import from URL…
+      </button>
+    {/if}
+    {#if importError}
+      <div class="notice bad" role="alert">{importError}</div>
+    {:else if importNote}
+      <div class="notice ok" role="status">Filled from URL: {importNote}</div>
+    {/if}
+
     <div class="engines" role="radiogroup" aria-label="Engine">
       {#each engines as eng (eng)}
         <button
@@ -190,7 +317,8 @@
     </label>
 
     {#if isSqlite}
-      <div class="field">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="field" onpastecapture={onUrlPaste}>
         <span class="lbl">Database file</span>
         <FilePick
           bind:value={cfg.filePath}
@@ -203,13 +331,13 @@
       {#if isMongo}
         <label>
           <span class="lbl">Connection URL <span class="opt">optional, overrides host and port</span></span>
-          <input type="text" bind:value={cfg.url} placeholder="mongodb://host:27017/?replicaSet=rs0" />
+          <input type="text" bind:value={cfg.url} placeholder="mongodb://host:27017/?replicaSet=rs0" onpaste={onUrlPaste} />
         </label>
       {/if}
       <div class="row hostport">
         <label>
           <span class="lbl">Host</span>
-          <input type="text" bind:value={cfg.host} placeholder="127.0.0.1" />
+          <input type="text" bind:value={cfg.host} placeholder="127.0.0.1" onpaste={onUrlPaste} />
         </label>
         <label>
           <span class="lbl">Port</span>
@@ -359,6 +487,35 @@
     color: var(--fg-muted);
     font-size: 11.5px;
     font-weight: 500;
+  }
+
+  .importbtn {
+    align-self: flex-start;
+    gap: 5px;
+    min-height: 0;
+    padding: 2px 6px;
+    margin-left: -6px;
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    color: var(--accent);
+    font-size: 12px;
+  }
+
+  .importbtn:hover {
+    background: var(--accent-soft);
+  }
+
+  .import {
+    display: flex;
+    gap: 6px;
+  }
+
+  .import input {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--mono);
+    font-size: 12px;
   }
 
   .engines {

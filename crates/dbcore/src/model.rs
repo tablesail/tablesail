@@ -556,3 +556,37 @@ pub struct JobProgress {
     #[serde(default)]
     pub warning: Option<String>,
 }
+
+// ---------------------------------------------------------------------------
+// SQL files and table admin
+// ---------------------------------------------------------------------------
+
+/// Runs a .sql file (e.g. a dump) statement by statement as a background job.
+/// `JobProgress.rows` counts the statements that ran, `.bytes` the bytes of the file consumed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqlImport {
+    pub path: String,
+    /// Database to run in; None = the connection's default.
+    #[serde(default)]
+    pub database: Option<String>,
+    /// false = keep going after a failed statement and report the failures as a warning.
+    #[serde(default = "yes")]
+    pub stop_on_error: bool,
+}
+
+/// Drop / truncate / rename a table (or view / collection).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TableAction {
+    Drop,
+    /// Removes every row, keeps the table.
+    Truncate,
+    Rename {
+        new_name: String,
+    },
+}

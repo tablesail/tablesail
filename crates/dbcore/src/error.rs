@@ -2,6 +2,9 @@ use serde::Serialize;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// What the UI is told when a write is attempted on a read-only connection.
+pub const READ_ONLY: &str = "This connection is read-only.";
+
 /// Every error dbcore returns. Serialized to the UI as `{ kind, message }`.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum Error {

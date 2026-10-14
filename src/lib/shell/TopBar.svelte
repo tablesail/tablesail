@@ -7,6 +7,8 @@
 <script lang="ts">
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte'
   import Icon from '../ui/Icon.svelte'
+  import { importBlockedReason, openSqlFile, pickSqlImport, saveTabAs } from '../editor/sqlFiles'
+  import { disconnect } from '../editor/transaction'
   import { inspector } from '../stores/inspector.svelte'
   import { sessions } from '../stores/sessions.svelte'
   import { tabs } from '../stores/tabs.svelte'
@@ -48,7 +50,13 @@
     menu = { x: alignRight ? r.right - 210 : r.left, y: r.bottom + 6, items }
   }
 
+  let queryTab = $derived(activeTab?.kind === 'query' ? activeTab : null)
+
   let appItems = $derived<MenuItem[]>([
+    { label: 'Open SQL file…', hint: `${modLabel}O`, disabled: !session, onclick: () => session && void openSqlFile(session) },
+    { label: 'Save to file…', hint: `${modLabel}⇧S`, disabled: !queryTab, onclick: () => queryTab && void saveTabAs(queryTab) },
+    { label: 'Import SQL dump…', disabled: !session || !!importBlockedReason(session), onclick: () => session && void pickSqlImport(session) },
+    { separator: true },
     { label: theme.isDark ? 'Light appearance' : 'Dark appearance', hint: `${modLabel}⇧L`, onclick: () => theme.toggle() },
     { label: 'Use system appearance', disabled: theme.mode === 'system', onclick: () => theme.set('system') },
     { separator: true },
@@ -69,7 +77,7 @@
           })),
           { separator: true },
           { label: 'Open another connection…', onclick: () => (sessions.view = 'connections') },
-          { label: 'Disconnect', danger: true, onclick: () => sessions.close(session.sessionId) },
+          { label: 'Disconnect', danger: true, onclick: () => disconnect(session.sessionId) },
         ]
       : [],
   )

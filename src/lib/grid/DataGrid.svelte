@@ -34,20 +34,25 @@
     onContextMenu (event, row, col) => void
     onKeyDown    (event) => boolean        called first for keys pressed on the focused grid;
                                            return true to swallow the key
+    onPaste      (text: string) => void    Cmd/Ctrl+V on the focused grid (not while a cell editor is open),
+                                           with the clipboard text; enables pasting
     emptyMessage string                    shown when rowCount is 0 (default "No rows")
     label        string                    accessible name of the grid (e.g. the table name)
 
   Exported methods (bind:this): focus(), edit(row, col), getSelection(), selectCell(row, col), selectRows(from, to),
-  scrollToRow(row), copySelection(withHeader?), clearSelection().
+  selectRange(row0, col0, row1, col1), scrollToRow(row), copySelection(withHeader?), copyAs(format, context),
+  clearSelection().
 
   Keyboard: arrows, Shift+arrows (extend), Cmd/Ctrl+arrows (edges), Home/End, PageUp/PageDown,
-  Cmd/Ctrl+A, Cmd/Ctrl+C (TSV), Tab / Shift+Tab, Enter / F2 / double click / typing to edit.
+  Cmd/Ctrl+A, Cmd/Ctrl+C (TSV; NULL is written as NULL), Cmd/Ctrl+Shift+C (TSV with headers),
+  Cmd/Ctrl+V (paste), Menu key / Shift+F10 (cell menu), Tab / Shift+Tab, Enter / F2 / double click / typing to edit.
 -->
 <script lang="ts">
   import { untrack, type Snippet } from 'svelte'
-  import type { CellInput, ColumnMeta, Row, Sort } from '../types'
-  import { formatValue, valueToEditText, statusTone } from '../format'
-  import type { EditMove, EditorContext, GridSelection } from './types'
+  import type { CellInput, ColumnMeta, Engine, Row, Sort, TableRef } from '../types'
+  import { formatValue, statusTone } from '../format'
+  import { countTruncated, formatRows, rememberCopied, tsvCell, tsvField, type RowFormat } from '../util/rowFormats'
+  import type { CopyReport, EditMove, EditorContext, GridSelection } from './types'
   import {
     HEADER_H,
     ROW_H,
@@ -78,6 +83,7 @@
     onSelectionChange?: (sel: GridSelection | null) => void
     onContextMenu?: (e: MouseEvent, row: number, col: number) => void
     onKeyDown?: (e: KeyboardEvent) => boolean
+    onPaste?: (text: string) => void
     emptyMessage?: string
     label?: string
   }
@@ -102,6 +108,7 @@
     onSelectionChange,
     onContextMenu,
     onKeyDown,
+    onPaste,
     emptyMessage = 'No rows',
     label,
   }: Props = $props()
@@ -687,10 +694,16 @@
         if (anchor) startEdit(anchor.r, anchor.c)
         break
       default:
-        if (mod && (e.key === 'a' || e.key === 'A')) {
+        if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey && !mod)) {
+          openMenuAtActive()
+        } else if (mod && (e.key === 'a' || e.key === 'A')) {
           if (rowCount > 0 && nCols > 0) setSelection({ r: 0, c: 0 }, { r: rowCount - 1, c: nCols - 1 })
         } else if (mod && (e.key === 'c' || e.key === 'C')) {
           void copySelection(e.shiftKey)
+        } else if (mod && !e.altKey && (e.key === 'v' || e.key === 'V') && onPaste) {
+          // Not handled here: the browser fires the paste event, which carries the clipboard text.
+          armPasteFallback()
+          handled = false
         } else if (!mod && !e.altKey && e.key.length === 1 && anchor && editable) {
           startEdit(anchor.r, anchor.c, e.key)
         } else {
@@ -700,8 +713,39 @@
     if (handled) e.preventDefault()
   }
 
-  function tsvEscape(text: string): string {
-    return /[\t\n\r"]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text
+  /** The Menu key and Shift+F10: the cell menu of the active cell, placed where a right click on it would open it. */
+  function openMenuAtActive() {
+    const s = selection
+    if (!s || !bodyEl || !onContextMenu) return
+    ensureVisible(s.activeRow, s.activeCol)
+    const rect = bodyEl.getBoundingClientRect()
+    const x = rect.left + (colLeft[s.activeCol] ?? 0) - scrollLeft + 12
+    const y = rect.top + (s.activeRow + 1) * ROW_H - vt - 4
+    onContextMenu(new MouseEvent('contextmenu', { clientX: x, clientY: y }), s.activeRow, s.activeCol)
+  }
+
+  /** Puts text on the clipboard; falls back to execCommand where the async API is unavailable. False when both refuse. */
+  async function writeClipboard(text: string): Promise<boolean> {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      let ok = false
+      try {
+        ok = document.execCommand('copy')
+      } catch {
+        // refused as well
+      }
+      ta.remove()
+      scroller?.focus({ preventScroll: true })
+      return ok
+    }
   }
 
   export async function copySelection(withHeader = false) {
@@ -710,7 +754,7 @@
     const lines: string[] = []
     if (withHeader) {
       const names: string[] = []
-      for (let c = s.col0; c <= s.col1; c++) names.push(tsvEscape(columns[c].name))
+      for (let c = s.col0; c <= s.col1; c++) names.push(tsvField(columns[c].name))
       lines.push(names.join('\t'))
     }
     const width = s.col1 - s.col0 + 1
@@ -719,23 +763,71 @@
     for (let r = s.row0; r <= lastRow; r++) {
       const row = getRow(r)
       const parts: string[] = []
-      for (let c = s.col0; c <= s.col1; c++) parts.push(tsvEscape(row ? valueToEditText(row[c]) : ''))
+      for (let c = s.col0; c <= s.col1; c++) parts.push(row ? tsvCell(row[c]) : '')
       lines.push(parts.join('\t'))
     }
     const text = lines.join('\n')
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.select()
-      document.execCommand('copy')
-      ta.remove()
-      scroller?.focus({ preventScroll: true })
+    rememberCopied(text)
+    await writeClipboard(text)
+  }
+
+  /**
+   * Copies the selection as INSERT statements, JSON, a Markdown table or TSV. One selected cell stands for
+   * its whole row; a larger selection keeps just the selected columns. `table` is the source table for
+   * INSERT statements (a placeholder name is used without one); `maxRows` lowers the row limit.
+   */
+  export async function copyAs(
+    format: RowFormat,
+    context: { engine: Engine; table?: TableRef | null; maxRows?: number },
+  ): Promise<CopyReport | null> {
+    const s = selection
+    if (!s) return null
+    const wholeRow = format !== 'tsv' && s.row0 === s.row1 && s.col0 === s.col1
+    const c0 = wholeRow ? 0 : s.col0
+    const c1 = wholeRow ? nCols - 1 : s.col1
+    const cols = columns.slice(c0, c1 + 1)
+    const maxRows = Math.max(1, Math.min(context.maxRows ?? Infinity, Math.floor(MAX_COPY_CELLS / cols.length)))
+    const lastRow = Math.min(s.row1, s.row0 + maxRows - 1)
+    const rows: Row[] = []
+    let skipped = 0
+    for (let r = s.row0; r <= lastRow; r++) {
+      const row = getRow(r)
+      if (row) rows.push(row.slice(c0, c1 + 1))
+      else skipped++
     }
+    const capped = s.row1 - lastRow
+    if (rows.length === 0) return { format, rows: 0, skipped, capped, truncated: 0, written: false }
+    const text = formatRows(format, { engine: context.engine, table: context.table, columns: cols, rows })
+    if (format === 'tsv') rememberCopied(text)
+    const written = await writeClipboard(text)
+    return { format, rows: rows.length, skipped, capped, truncated: countTruncated(rows), written }
+  }
+
+  // Paste. Normally the `paste` event delivers the text without any permission prompt. Where a webview does
+  // not fire it for a focused plain element, Cmd/Ctrl+V falls back to reading the clipboard after a moment.
+  let pasteSeq = 0
+  let pasteDone = 0
+
+  function onPasteEvent(e: ClipboardEvent) {
+    if (!onPaste || editing || e.target !== scroller) return
+    const text = e.clipboardData?.getData('text/plain')
+    if (text === undefined || text === null) return
+    e.preventDefault()
+    pasteDone = pasteSeq
+    onPaste(text)
+  }
+
+  function armPasteFallback() {
+    const seq = ++pasteSeq
+    setTimeout(async () => {
+      if (pasteDone >= seq || editing || document.activeElement !== scroller) return
+      pasteDone = seq
+      try {
+        onPaste?.(await navigator.clipboard.readText())
+      } catch {
+        // clipboard access refused: nothing to paste
+      }
+    }, 150)
   }
 
   // ---------------------------------------------------------------------------
@@ -767,6 +859,14 @@
     setSelection({ r: clamp(from, 0, rowCount - 1), c: 0 }, { r: clamp(to, 0, rowCount - 1), c: nCols - 1 })
   }
 
+  /** Selects a rectangle of cells; the first corner is the active cell. */
+  export function selectRange(row0: number, col0: number, row1: number, col1: number) {
+    if (rowCount === 0 || nCols === 0) return
+    const a = { r: clamp(row0, 0, rowCount - 1), c: clamp(col0, 0, nCols - 1) }
+    setSelection(a, { r: clamp(row1, 0, rowCount - 1), c: clamp(col1, 0, nCols - 1) })
+    ensureVisible(a.r, a.c)
+  }
+
   export function clearSelection() {
     anchor = head = null
   }
@@ -793,6 +893,7 @@
   aria-activedescendant={selection ? cellId(selection.activeRow, selection.activeCol) : undefined}
   onscroll={onScroll}
   onkeydown={onKeydown}
+  onpaste={onPasteEvent}
 >
   <div class="spacer" role="presentation" style:width="{spacerW}px" style:height="{vm.spacerH}px">
     <div class="window" role="presentation" style:width="{clientW}px" style:height="{clientH}px">

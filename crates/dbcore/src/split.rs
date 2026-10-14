@@ -36,6 +36,108 @@ pub fn statement_kind(sql: &str, dialect: Dialect) -> StatementKind {
     classify_statement(sql, dialect).0
 }
 
+/// A statement that only means something on one connection because it starts, ends or
+/// subdivides a transaction, or changes how the connection's transactions behave.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TxControl {
+    /// BEGIN, START TRANSACTION.
+    Begin,
+    /// COMMIT, END.
+    Commit,
+    /// ROLLBACK, ABORT.
+    Rollback,
+    /// SAVEPOINT, RELEASE [SAVEPOINT], ROLLBACK TO [SAVEPOINT].
+    Savepoint,
+    /// SET autocommit, SET TRANSACTION.
+    Settings,
+}
+
+/// The transaction control a statement performs, if any. Mongo scripts have none.
+pub fn transaction_control(sql: &str, dialect: Dialect) -> Option<TxControl> {
+    if dialect == Dialect::Mongo {
+        return None;
+    }
+    let mut toks = Toks::new(sql, dialect).filter(|t| !matches!(t, Tok::Punct(b'@')));
+    let Some(Tok::Word(first)) = toks.next() else {
+        return None;
+    };
+    let mut next_is =
+        |names: &[&str]| matches!(toks.next(), Some(Tok::Word(w)) if is_any_ci(w, names));
+    if is_any_ci(first, &["BEGIN"]) {
+        Some(TxControl::Begin)
+    } else if is_any_ci(first, &["START"]) {
+        next_is(&["TRANSACTION"]).then_some(TxControl::Begin)
+    } else if is_any_ci(first, &["COMMIT", "END"]) {
+        Some(TxControl::Commit)
+    } else if is_any_ci(first, &["ABORT"]) {
+        Some(TxControl::Rollback)
+    } else if is_any_ci(first, &["SAVEPOINT", "RELEASE"]) {
+        Some(TxControl::Savepoint)
+    } else if is_any_ci(first, &["ROLLBACK"]) {
+        // `ROLLBACK [WORK | TRANSACTION] TO [SAVEPOINT] name` keeps the transaction open.
+        let mut rest = toks.filter_map(|t| match t {
+            Tok::Word(w) => Some(w),
+            _ => None,
+        });
+        let word = rest
+            .by_ref()
+            .find(|w| !is_any_ci(w, &["WORK", "TRANSACTION"]));
+        Some(match word {
+            Some(w) if is_any_ci(w, &["TO"]) => TxControl::Savepoint,
+            _ => TxControl::Rollback,
+        })
+    } else if is_any_ci(first, &["SET"]) {
+        // `SET [SESSION | LOCAL | GLOBAL] [@@]autocommit = …`, `SET [SESSION] TRANSACTION …`.
+        let word = toks.find_map(|t| match t {
+            Tok::Word(w) if !is_any_ci(w, &["SESSION", "LOCAL", "GLOBAL"]) => Some(Some(w)),
+            Tok::Word(_) => None,
+            _ => Some(None),
+        });
+        match word {
+            Some(Some(w)) if is_any_ci(w, &["AUTOCOMMIT", "TRANSACTION"]) => {
+                Some(TxControl::Settings)
+            }
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// What carries over from one chunk of a script to the next: the MySQL `DELIMITER` in effect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChunkState {
+    delimiter: Vec<u8>,
+}
+
+impl Default for ChunkState {
+    fn default() -> Self {
+        ChunkState {
+            delimiter: vec![b';'],
+        }
+    }
+}
+
+/// Splits a script that is read in pieces (a dump too big to hold twice in memory).
+///
+/// `chunk` is the unprocessed text so far. Returns the statements that are complete (offsets
+/// relative to `chunk`) and how many bytes of `chunk` they and the text before them used up; the
+/// caller keeps the rest, appends the next piece and calls again with the same `state`. A
+/// statement counts as complete once its terminator has been seen, so one cut off by the end of
+/// the chunk is never returned half-read. With `last` set the chunk is the end of the script and
+/// a final statement without terminator is returned too (everything is then consumed).
+pub fn split_chunk(
+    chunk: &str,
+    dialect: Dialect,
+    state: &mut ChunkState,
+    last: bool,
+) -> (Vec<StatementSpan>, usize) {
+    match dialect {
+        Dialect::Mongo => (split_mongo(chunk), chunk.len()),
+        _ => split_sql_from(chunk, dialect, &mut state.delimiter, last),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Lexical helpers (byte level; every delimiter we look for is ASCII, so offsets
 // always land on UTF-8 boundaries)
@@ -230,6 +332,17 @@ fn is_any_ci(w: &[u8], names: &[&str]) -> bool {
 }
 
 fn split_sql(sql: &str, dialect: Dialect) -> Vec<StatementSpan> {
+    split_sql_from(sql, dialect, &mut vec![b';'], true).0
+}
+
+/// The splitter proper. `last` false: statements without terminator are left for the caller to
+/// complete with more text; the returned count says how much of `sql` has been dealt with.
+fn split_sql_from(
+    sql: &str,
+    dialect: Dialect,
+    delimiter: &mut Vec<u8>,
+    last: bool,
+) -> (Vec<StatementSpan>, usize) {
     let b = sql.as_bytes();
     let n = b.len();
     let mysql = matches!(dialect, Dialect::Mysql { .. });
@@ -243,7 +356,7 @@ fn split_sql(sql: &str, dialect: Dialect) -> Vec<StatementSpan> {
     );
 
     let mut out = Vec::new();
-    let mut delimiter: Vec<u8> = vec![b';'];
+    let mut consumed = 0;
     let mut st = StmtState::default();
     let mut line_start = true;
     let mut i = 0;
@@ -308,21 +421,28 @@ fn split_sql(sql: &str, dialect: Dialect) -> Vec<StatementSpan> {
             while j < n && !b[j].is_ascii_whitespace() {
                 j += 1;
             }
-            if j > ds {
-                delimiter = b[ds..j].to_vec();
+            let line_end = skip_line(b, j);
+            if !last && line_end >= n {
+                // The line may continue in the next piece.
+                break;
             }
-            i = skip_line(b, j);
+            if j > ds {
+                *delimiter = b[ds..j].to_vec();
+            }
+            i = line_end;
+            consumed = i;
             continue;
         }
         line_start = false;
 
         // Terminator. Semicolons inside BEGIN … END bodies belong to the body.
         if c == delimiter[0]
-            && b[i..].starts_with(&delimiter)
-            && (delimiter != b";" || st.depth <= 0)
+            && b[i..].starts_with(delimiter)
+            && (delimiter.as_slice() != b";" || st.depth <= 0)
         {
             finish(&mut st, &mut out);
             i += delimiter.len();
+            consumed = i;
             continue;
         }
 
@@ -346,11 +466,11 @@ fn split_sql(sql: &str, dialect: Dialect) -> Vec<StatementSpan> {
             },
             c if is_ident_start(c) || c.is_ascii_digit() => {
                 let s = i;
-                let custom = delimiter != b";";
+                let custom = delimiter.as_slice() != b";";
                 // A custom delimiter such as `$$` may be glued to the last word.
                 while i < n
                     && is_ident_char(b[i])
-                    && !(custom && i > s && b[i..].starts_with(&delimiter))
+                    && !(custom && i > s && b[i..].starts_with(delimiter))
                 {
                     i += 1;
                 }
@@ -369,8 +489,11 @@ fn split_sql(sql: &str, dialect: Dialect) -> Vec<StatementSpan> {
         }
         st.last_end = i;
     }
-    finish(&mut st, &mut out);
-    out
+    if last {
+        finish(&mut st, &mut out);
+        consumed = n;
+    }
+    (out, consumed)
 }
 
 // ---------------------------------------------------------------------------
@@ -1026,6 +1149,127 @@ mod tests {
                 MY
             ),
             ["SELECT 1", "SELECT 2; SELECT 3", "SELECT 4"]
+        );
+    }
+
+    /// Splits `sql` the way a reader of a big file does: `size` bytes at a time (a piece may end
+    /// inside a multi-byte character, so it is extended to one boundary).
+    fn in_pieces(sql: &str, d: Dialect, size: usize) -> Vec<String> {
+        let mut state = ChunkState::default();
+        let mut out = Vec::new();
+        let mut carry = String::new();
+        let mut rest = sql;
+        loop {
+            let mut end = size.min(rest.len());
+            while end < rest.len() && !rest.is_char_boundary(end) {
+                end += 1;
+            }
+            carry.push_str(&rest[..end]);
+            rest = &rest[end..];
+            let last = rest.is_empty();
+            let (spans, used) = split_chunk(&carry, d, &mut state, last);
+            for span in &spans {
+                assert_eq!(span.sql, carry[span.start..span.end]);
+            }
+            out.extend(spans.into_iter().map(|s| s.sql));
+            carry.drain(..used);
+            if last {
+                assert!(carry.is_empty());
+                return out;
+            }
+        }
+    }
+
+    #[test]
+    fn pieces_split_like_the_whole() {
+        let scripts: [(&str, Dialect); 7] = [
+            (
+                "SELECT 1;\nDELIMITER //\nCREATE PROCEDURE p() BEGIN SELECT 1; SELECT 2; END//\n\
+                 DELIMITER ;\nSELECT 'a;b' ; -- c;\nSELECT `x;y`, \"q;\";\n/*!40101 SET x=1 */;\n\
+                 delimiter $$\nSELECT 'é'; SELECT 3$$\nDELIMITER ;\nSELECT 4",
+                MY,
+            ),
+            (
+                "SELECT 'it\\'s;', 2;\nSELECT 'ünï;';\n# hash; comment\nSELECT 3;",
+                MY,
+            ),
+            (
+                "SELECT $$a;b$$;\nCREATE FUNCTION f() RETURNS int AS $body$ BEGIN RETURN 1; END; $body$ LANGUAGE plpgsql;\n\
+                 SELECT E'it\\'s;';\n/* a /* nested */ ; */ SELECT 2;\nSELECT 'ünï;'",
+                PG,
+            ),
+            (
+                "CREATE TRIGGER t AFTER INSERT ON x BEGIN UPDATE x SET a = 1; INSERT INTO y VALUES (2); END;\n\
+                 CREATE TABLE [we;ird] (a);\nSELECT 1; SELECT 'x'",
+                LITE,
+            ),
+            ("   \n-- only a comment\n/* and another */  ", LITE),
+            ("", PG),
+            ("SELECT 日本語🙂;SELECT 'é'", MY_NB),
+        ];
+        for (sql, d) in scripts {
+            let whole = texts(sql, d);
+            for size in (1..=sql.len().max(1)).chain([1 << 20]) {
+                assert_eq!(
+                    in_pieces(sql, d, size),
+                    whole,
+                    "{d:?}, {size} bytes at a time: {sql:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_piece_leaves_unfinished_statements_for_the_next() {
+        let mut state = ChunkState::default();
+        let (spans, used) = split_chunk("SELECT 1; SELECT 2", PG, &mut state, false);
+        assert_eq!(
+            spans.iter().map(|s| s.sql.as_str()).collect::<Vec<_>>(),
+            ["SELECT 1"]
+        );
+        assert_eq!(used, "SELECT 1;".len());
+        // The tail is returned when it is known to be the end.
+        let (spans, used) = split_chunk(" SELECT 2", PG, &mut state, true);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(used, " SELECT 2".len());
+        // Nothing complete: nothing consumed, and an open string is not a statement.
+        let (spans, used) = split_chunk(
+            "SELECT 'abc; SELECT 1;",
+            PG,
+            &mut ChunkState::default(),
+            false,
+        );
+        assert!(spans.is_empty());
+        assert_eq!(used, 0);
+    }
+
+    #[test]
+    fn a_delimiter_command_cut_by_the_piece_waits_for_its_line_end() {
+        let mut state = ChunkState::default();
+        let (spans, used) = split_chunk("SELECT 1;\nDELIMITER /", MY, &mut state, false);
+        assert_eq!(spans.len(), 1);
+        assert_eq!(used, "SELECT 1;".len());
+        // Once the line is complete the new delimiter is in effect, and it carries over.
+        let (spans, used) = split_chunk(
+            "\nDELIMITER //\nSELECT 2; SELECT 3//",
+            MY,
+            &mut state,
+            false,
+        );
+        assert_eq!(
+            spans.iter().map(|s| s.sql.as_str()).collect::<Vec<_>>(),
+            ["SELECT 2; SELECT 3"]
+        );
+        assert_eq!(used, "\nDELIMITER //\nSELECT 2; SELECT 3//".len());
+        let (spans, _) = split_chunk(
+            "\nSELECT 4; SELECT 5//\nDELIMITER ;\n",
+            MY,
+            &mut state,
+            true,
+        );
+        assert_eq!(
+            spans.iter().map(|s| s.sql.as_str()).collect::<Vec<_>>(),
+            ["SELECT 4; SELECT 5"]
         );
     }
 

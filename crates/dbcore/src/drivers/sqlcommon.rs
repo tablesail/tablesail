@@ -5,7 +5,8 @@
 //! - `Pump`: turns a driver's row stream into batched `CursorEvent`s with backpressure
 //! - `IdleList`/`Lease`: sticky dedicated connections for `query()` (so `BEGIN` and
 //!   `SET` survive between statements of a script) that are cancelled and discarded
-//!   when a cursor is dropped mid-query
+//!   when a cursor is dropped mid-query; on a pinned driver (one connection, for a manual
+//!   transaction) the list also hands the connection to one statement at a time
 //! - generic transaction runners for change sets and imports
 
 use std::collections::HashMap;
@@ -14,6 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use futures_util::future::BoxFuture;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::cursor::{EventSender, PRODUCER_BATCH, send};
 use crate::dialect::Dialect;
@@ -53,6 +55,7 @@ type Timed<T> = HashMap<TableRef, (Instant, Arc<T>)>;
 pub struct StructureCache {
     structures: Mutex<Timed<TableStructure>>,
     keys: Mutex<Timed<Vec<String>>>,
+    names: Mutex<Timed<Vec<String>>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -97,9 +100,26 @@ impl StructureCache {
         key
     }
 
+    /// Every column name of the table (hidden ones included), for checking what a request names.
+    pub fn column_names(&self, table: &TableRef) -> Option<Arc<Vec<String>>> {
+        lock(&self.names)
+            .get(table)
+            .filter(|(at, _)| at.elapsed() < STRUCTURE_TTL)
+            .map(|(_, n)| n.clone())
+    }
+
+    pub fn put_column_names(&self, table: &TableRef, names: Vec<String>) -> Arc<Vec<String>> {
+        let names = Arc::new(names);
+        let mut map = lock(&self.names);
+        map.retain(|_, (at, _)| at.elapsed() < STRUCTURE_TTL);
+        map.insert(table.clone(), (Instant::now(), names.clone()));
+        names
+    }
+
     pub fn clear(&self) {
         lock(&self.structures).clear();
         lock(&self.keys).clear();
+        lock(&self.names).clear();
     }
 }
 
@@ -531,6 +551,10 @@ pub struct Pump {
     first_row_of_set: bool,
     last_flush: Instant,
     grid: bool,
+    /// The consumer going away does not stop the statement: it is read to its end and the
+    /// rows are dropped (the connection holds a transaction and must not be thrown away).
+    keep_reading: bool,
+    gone: bool,
 }
 
 impl Pump {
@@ -542,6 +566,33 @@ impl Pump {
             first_row_of_set: false,
             last_flush: Instant::now(),
             grid,
+            keep_reading: false,
+            gone: false,
+        }
+    }
+
+    /// Keeps reading the statement after the consumer is gone (pinned connections).
+    pub fn keep_reading(mut self, keep: bool) -> Self {
+        self.keep_reading = keep;
+        self
+    }
+
+    /// The consumer is gone and rows are only being read off the wire; the driver can skip decoding them.
+    pub fn gone(&self) -> bool {
+        self.gone
+    }
+
+    async fn emit(&mut self, event: CursorEvent) -> Result<()> {
+        if self.gone {
+            return Ok(());
+        }
+        match send(&self.tx, event).await {
+            Err(Error::Cancelled) if self.keep_reading => {
+                self.gone = true;
+                self.batch.clear();
+                Ok(())
+            }
+            other => other,
         }
     }
 
@@ -557,13 +608,16 @@ impl Pump {
 
     pub async fn columns(&mut self, columns: Vec<ColumnMeta>) -> Result<()> {
         self.flush().await?;
-        send(&self.tx, CursorEvent::Columns(columns)).await?;
+        self.emit(CursorEvent::Columns(columns)).await?;
         self.in_set = true;
         self.first_row_of_set = true;
         Ok(())
     }
 
     pub async fn row(&mut self, row: Row) -> Result<()> {
+        if self.gone {
+            return Ok(());
+        }
         if self.batch.capacity() == 0 {
             self.batch.reserve(PRODUCER_BATCH);
         }
@@ -581,7 +635,7 @@ impl Pump {
     pub async fn flush(&mut self) -> Result<()> {
         if !self.batch.is_empty() {
             let rows = std::mem::take(&mut self.batch);
-            send(&self.tx, CursorEvent::Rows(rows)).await?;
+            self.emit(CursorEvent::Rows(rows)).await?;
         }
         self.last_flush = Instant::now();
         Ok(())
@@ -599,13 +653,13 @@ impl Pump {
         if defer {
             return Ok(Some(affected));
         }
-        send(&self.tx, CursorEvent::Affected(affected)).await?;
+        self.emit(CursorEvent::Affected(affected)).await?;
         Ok(None)
     }
 
     pub async fn affected(&mut self, affected: u64) -> Result<()> {
         self.flush().await?;
-        send(&self.tx, CursorEvent::Affected(affected)).await
+        self.emit(CursorEvent::Affected(affected)).await
     }
 }
 
@@ -632,9 +686,17 @@ impl<C> Idle<C> {
 
 /// LIFO list of parked connections: consecutive statements of a script land on the
 /// same connection, so transactions and session settings carry over.
+///
+/// A pinned list belongs to a driver that owns ONE connection for good (a manual
+/// transaction): statements take turns with it, and when it is gone nothing replaces it,
+/// because a new connection would silently run outside the transaction.
 pub struct IdleList<C> {
     items: Mutex<Vec<Idle<C>>>,
     max: usize,
+    /// One permit: whoever holds it is using the connection (running a statement, or still
+    /// reading one off the wire). `None` on ordinary lists.
+    turn: Option<Arc<Semaphore>>,
+    closed: AtomicBool,
 }
 
 impl<C> IdleList<C> {
@@ -642,6 +704,31 @@ impl<C> IdleList<C> {
         IdleList {
             items: Mutex::new(Vec::new()),
             max,
+            turn: None,
+            closed: AtomicBool::new(false),
+        }
+    }
+
+    pub fn pinned() -> Self {
+        IdleList {
+            turn: Some(Arc::new(Semaphore::new(1))),
+            ..IdleList::new(1)
+        }
+    }
+
+    pub fn is_pinned(&self) -> bool {
+        self.turn.is_some()
+    }
+
+    /// Waits until the connection of a pinned list is free. `None` for ordinary lists.
+    pub async fn wait_turn(&self) -> Result<Option<OwnedSemaphorePermit>> {
+        match &self.turn {
+            None => Ok(None),
+            Some(turn) => {
+                turn.clone().acquire_owned().await.map(Some).map_err(|_| {
+                    Error::Other("This transaction's connection is closed.".to_owned())
+                })
+            }
         }
     }
 
@@ -650,6 +737,10 @@ impl<C> IdleList<C> {
     }
 
     pub fn give(&self, idle: Idle<C>) {
+        if self.closed.load(Ordering::SeqCst) {
+            // The driver is closing: a connection coming back late must not outlive it.
+            return;
+        }
         let mut items = lock(&self.items);
         items.push(idle);
         if items.len() > self.max {
@@ -660,6 +751,24 @@ impl<C> IdleList<C> {
     pub fn clear(&self) {
         lock(&self.items).clear();
     }
+
+    /// Drops every parked connection, refuses later ones, and stops statements waiting for their turn.
+    pub fn close(&self) {
+        self.closed.store(true, Ordering::SeqCst);
+        if let Some(turn) = &self.turn {
+            turn.close();
+        }
+        self.clear();
+    }
+}
+
+/// What a pinned driver reports when its connection (and with it the transaction) is gone.
+pub fn connection_lost() -> Error {
+    Error::Other(
+        "The connection of this transaction was closed, so the transaction is gone. \
+         Roll back to start over."
+            .to_owned(),
+    )
 }
 
 /// How a connection is thrown away when a statement was abandoned mid-way
@@ -685,6 +794,8 @@ pub struct Lease<C: Discard> {
     pub db: Option<String>,
     home: Arc<IdleList<C>>,
     abandon: Option<AbandonHook>,
+    /// Held while the lease is out, on a pinned list; released after the connection is parked again.
+    _turn: Option<OwnedSemaphorePermit>,
 }
 
 impl<C: Discard> Lease<C> {
@@ -695,7 +806,14 @@ impl<C: Discard> Lease<C> {
             db,
             home,
             abandon: None,
+            _turn: None,
         }
+    }
+
+    /// Makes the lease hold the connection's turn (pinned lists) until it is released or dropped.
+    pub fn with_turn(mut self, turn: Option<OwnedSemaphorePermit>) -> Self {
+        self._turn = turn;
+        self
     }
 
     pub fn from_idle(idle: Idle<C>, home: Arc<IdleList<C>>) -> Self {
@@ -760,6 +878,7 @@ pub fn connection_survives(err: &Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cursor::EventSender;
     use crate::model::{Filter, FilterOp, Sort};
 
     const PG: Dialect = Dialect::Postgres;
@@ -998,5 +1117,112 @@ mod tests {
         ));
         s.start();
         assert!(!s.requested.load(Ordering::SeqCst));
+    }
+
+    struct Conn(&'static str);
+
+    impl Discard for Conn {
+        fn discard(self) {}
+    }
+
+    fn parked(list: &IdleList<Conn>) {
+        list.give(Idle {
+            conn: Conn("the one"),
+            id: 1,
+            db: None,
+            since: Instant::now(),
+        });
+    }
+
+    #[tokio::test]
+    async fn a_pinned_list_hands_its_connection_to_one_statement_at_a_time() {
+        let list = Arc::new(IdleList::pinned());
+        parked(&list);
+        assert!(list.is_pinned());
+
+        let turn = list.wait_turn().await.unwrap();
+        let idle = list.take().expect("the connection");
+        let lease = Lease::from_idle(idle, list.clone()).with_turn(turn);
+
+        // The next statement waits as long as the lease is out ...
+        let waiting = {
+            let list = list.clone();
+            tokio::spawn(async move { list.wait_turn().await.map(|t| t.is_some()) })
+        };
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(!waiting.is_finished());
+        // ... and gets the connection back once it is released.
+        lease.release();
+        assert!(waiting.await.unwrap().unwrap());
+        assert_eq!(list.take().expect("parked again").conn.0, "the one");
+    }
+
+    #[tokio::test]
+    async fn a_pinned_connection_that_is_discarded_is_not_replaced() {
+        let list = Arc::new(IdleList::pinned());
+        parked(&list);
+        let turn = list.wait_turn().await.unwrap();
+        let lease = Lease::from_idle(list.take().unwrap(), list.clone()).with_turn(turn);
+        lease.discard();
+        // Whoever gets the turn next finds nothing to use, which the driver reports as lost.
+        let _turn = list.wait_turn().await.unwrap();
+        assert!(list.take().is_none());
+        assert!(matches!(connection_lost(), Error::Other(m) if m.contains("transaction is gone")));
+    }
+
+    #[tokio::test]
+    async fn closing_a_list_refuses_late_arrivals_and_waiting_statements() {
+        let list = IdleList::pinned();
+        parked(&list);
+        let turn = list.wait_turn().await.unwrap();
+        list.close();
+        assert!(list.take().is_none());
+        parked(&list);
+        assert!(list.take().is_none(), "a closed list keeps nothing");
+        drop(turn);
+        assert!(list.wait_turn().await.is_err());
+        // Ordinary lists never make anyone wait.
+        let plain: IdleList<Conn> = IdleList::new(2);
+        assert!(plain.wait_turn().await.unwrap().is_none());
+        assert!(!plain.is_pinned());
+    }
+
+    fn pump_parts() -> (
+        EventSender,
+        tokio::sync::mpsc::Receiver<Result<CursorEvent>>,
+    ) {
+        tokio::sync::mpsc::channel(8)
+    }
+
+    #[tokio::test]
+    async fn a_pump_stops_when_nobody_reads_unless_told_to_keep_reading() {
+        let columns = vec![meta("a", "int", TypeFamily::Integer)];
+
+        let (tx, rx) = pump_parts();
+        drop(rx);
+        let mut pump = Pump::new(tx, false);
+        assert!(matches!(
+            pump.columns(columns.clone()).await,
+            Err(Error::Cancelled)
+        ));
+
+        let (tx, mut rx) = pump_parts();
+        let mut pump = Pump::new(tx, false).keep_reading(true);
+        pump.columns(columns.clone()).await.unwrap();
+        pump.row(vec![crate::value::Value::Int(1)]).await.unwrap();
+        pump.flush().await.unwrap();
+        assert!(!pump.gone());
+        assert!(matches!(rx.recv().await, Some(Ok(CursorEvent::Columns(_)))));
+        assert!(matches!(rx.recv().await, Some(Ok(CursorEvent::Rows(_)))));
+
+        // The reader leaves; the statement is still read to its end, silently.
+        drop(rx);
+        for i in 0..1000 {
+            pump.row(vec![crate::value::Value::Int(i)]).await.unwrap();
+        }
+        pump.end_set(0, false).await.unwrap();
+        pump.affected(3).await.unwrap();
+        pump.flush().await.unwrap();
+        assert!(pump.gone());
     }
 }

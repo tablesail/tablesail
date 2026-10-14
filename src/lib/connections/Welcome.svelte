@@ -12,7 +12,9 @@
   import { connections } from '../stores/connections.svelte'
   import { isAuthError, sessions } from '../stores/sessions.svelte'
   import { ui } from '../stores/ui.svelte'
+  import { disconnect } from '../editor/transaction'
   import type { ConnectionConfig, EnvTag, Secrets } from '../types'
+  import { connectionUrl, looksLikeUrl, parseConnectionUrl } from '../util/connUrl'
   import { ENGINE_LABEL, ENV_TAGS, describeConnection, envColor } from '../util/env'
   import { isMac, modLabel } from '../util/format'
   import { api } from '../api'
@@ -20,7 +22,7 @@
 
   let search = $state('')
   let selectedId = $state<string | null>(null)
-  let form = $state<{ initial: ConnectionConfig | null } | null>(null)
+  let form = $state<{ initial: ConnectionConfig | null; fromUrl?: string } | null>(null)
   let menu = $state<{ x: number; y: number; config: ConnectionConfig } | null>(null)
   let confirmDelete = $state<ConnectionConfig | null>(null)
   let opening = $state<string | null>(null)
@@ -123,6 +125,27 @@
     }
   }
 
+  /** The connection as a URL, without its password. */
+  async function copyUrl(config: ConnectionConfig) {
+    const url = connectionUrl(config)
+    if (!url) return
+    try {
+      await navigator.clipboard.writeText(url)
+      ui.toast('Connection URL copied (the password is not included)')
+    } catch {
+      ui.toast('Could not copy to the clipboard', 'error')
+    }
+  }
+
+  /** A connection URL pasted into the search box opens a new connection filled from it. */
+  function onSearchPaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData('text') ?? ''
+    // Only real URLs: a pasted file name is a search for a connection of that name.
+    if (!looksLikeUrl(text) || !parseConnectionUrl(text).ok) return
+    e.preventDefault()
+    form = { initial: null, fromUrl: text }
+  }
+
   function showMenu(e: MouseEvent, config: ConnectionConfig) {
     e.preventDefault()
     selectedId = config.id
@@ -133,10 +156,11 @@
     const live = sessions.byConnection(c.id)
     return [
       { label: live ? 'Switch to' : 'Open', onclick: () => openConnection(c) },
-      ...(live ? [{ label: 'Disconnect', onclick: () => sessions.close(live.sessionId) }] : []),
+      ...(live ? [{ label: 'Disconnect', onclick: () => disconnect(live.sessionId) }] : []),
       { separator: true },
       { label: 'Edit…', onclick: () => (form = { initial: c }) },
       { label: 'Duplicate', onclick: () => duplicate(c) },
+      { label: 'Copy as URL', disabled: !connectionUrl(c), onclick: () => copyUrl(c) },
       { separator: true },
       { label: 'Delete…', danger: true, onclick: () => (confirmDelete = c) },
     ]
@@ -171,6 +195,8 @@
       // Enter on a card's own buttons (Open, Actions) belongs to the button.
     } else if (e.key === 'Enter' && i >= 0) {
       e.preventDefault()
+      // A held Enter (e.g. the one that just ran a palette command) must not open a connection.
+      if (e.repeat) return
       void openConnection(flat[i])
     } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
       e.preventDefault()
@@ -195,7 +221,7 @@
         <span class="grow"></span>
         <label class="search">
           <Icon name="search" size={13} />
-          <input type="search" placeholder="Search connections…" bind:value={search} bind:this={searchEl} spellcheck="false" />
+          <input type="search" placeholder="Search connections…" bind:value={search} bind:this={searchEl} spellcheck="false" onpaste={onSearchPaste} />
         </label>
         <button class="outline" onclick={() => (form = { initial: { ...newConfig('sqlite'), name: '' } })}><Icon name="database" size={13} /> Open SQLite file</button>
         <button class="primary" onclick={() => (form = { initial: null })}><Icon name="plus" size={13} strokeWidth={1.8} /> New connection</button>
@@ -268,7 +294,7 @@
 </div>
 
 {#if form}
-  <ConnectionForm initial={form.initial} onClose={() => (form = null)} onSaved={(c) => (selectedId = c.id)} />
+  <ConnectionForm initial={form.initial} fromUrl={form.fromUrl} onClose={() => (form = null)} onSaved={(c) => (selectedId = c.id)} />
 {/if}
 
 {#if menu}

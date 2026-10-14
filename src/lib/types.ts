@@ -406,6 +406,23 @@ export interface JobProgress {
 }
 
 // ---------------------------------------------------------------------------
+// SQL files, dump import, manual transactions, table admin
+// ---------------------------------------------------------------------------
+
+/** Runs a .sql file (e.g. a dump) statement by statement as a background job.
+ *  JobProgress.rows counts executed statements, .bytes the bytes of SQL consumed. */
+export interface SqlImport {
+  path: string
+  /** Database to run in; null = the connection's default. */
+  database: string | null
+  /** false = keep going after a failed statement (errors are counted into JobProgress.warning). */
+  stopOnError: boolean
+}
+
+/** Drop / truncate / rename a table (or view / collection). */
+export type TableAction = { kind: 'drop' } | { kind: 'truncate' } | { kind: 'rename'; newName: string }
+
+// ---------------------------------------------------------------------------
 // Query log (console pane) and AI assistant
 // ---------------------------------------------------------------------------
 

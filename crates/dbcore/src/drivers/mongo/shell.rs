@@ -128,6 +128,12 @@ pub enum Op {
     Drop {
         collection: String,
     },
+    /// Renames within the statement's database.
+    RenameCollection {
+        collection: String,
+        to: String,
+        drop_target: bool,
+    },
 }
 
 impl Op {
@@ -140,8 +146,9 @@ impl Op {
                 | Op::CreateIndex { .. }
                 | Op::DropIndex { .. }
                 | Op::Drop { .. }
+                | Op::RenameCollection { .. }
                 | Op::RunCommand { .. }
-        )
+        ) || matches!(self, Op::Delete { many: true, filter, .. } if filter.is_empty())
     }
 }
 
@@ -1082,6 +1089,17 @@ fn collection_op(collection: String, root: &Call, modifiers: Vec<Call>) -> Resul
         },
         "getIndexes" => Op::GetIndexes { collection },
         "drop" => Op::Drop { collection },
+        "renameCollection" => Op::RenameCollection {
+            collection,
+            to: match args.first().map(|a| parse_value(a)).transpose()? {
+                Some(Bson::String(s)) if !s.is_empty() => s,
+                _ => return Err(bad("renameCollection() expects the new collection name")),
+            },
+            drop_target: matches!(
+                args.get(1).map(|a| parse_value(a)).transpose()?,
+                Some(Bson::Boolean(true))
+            ),
+        },
         other => {
             return Err(Error::Unsupported(format!(
                 "{other}() is not supported on collections"
@@ -1323,6 +1341,35 @@ mod tests {
             Op::DropIndex { .. }
         ));
         assert!(matches!(parse("db.c.drop()").unwrap().op, Op::Drop { .. }));
+        assert_eq!(
+            parse(r#"db.getCollection("old name").renameCollection("new", true)"#)
+                .unwrap()
+                .op,
+            Op::RenameCollection {
+                collection: "old name".into(),
+                to: "new".into(),
+                drop_target: true,
+            }
+        );
+        assert!(matches!(
+            parse("db.c.renameCollection('d')").unwrap().op,
+            Op::RenameCollection {
+                drop_target: false,
+                ..
+            }
+        ));
+        assert!(parse("db.c.renameCollection()").is_err());
+        // Emptying a collection leaves nothing to infer columns from; other deletes keep them.
+        for (sql, stale) in [
+            ("db.c.renameCollection('d')", true),
+            ("db.c.drop()", true),
+            ("db.c.deleteMany({})", true),
+            ("db.c.deleteMany({ a: 1 })", false),
+            ("db.c.deleteOne({})", false),
+            ("db.c.find({})", false),
+        ] {
+            assert_eq!(parse(sql).unwrap().op.modifies_schema(), stale, "{sql}");
+        }
     }
 
     #[test]

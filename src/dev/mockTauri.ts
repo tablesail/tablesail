@@ -353,6 +353,22 @@ LIMIT 10;
 
 Change \`LIMIT\` to see more rows, or add a \`WHERE\` clause to narrow them down.`
 
+// Manual transactions and in-memory .sql files (tests may seed window.__TABLESAIL_MOCK_FILES__).
+const openTxs = new Set<string>()
+function mockFiles(): Record<string, string> {
+  const w = window as any
+  return (w.__TABLESAIL_MOCK_FILES__ ??= {})
+}
+function adminSql(table: TableRef, action: { kind: string; newName?: string }): string {
+  const q = (n: string) => '"' + n.replaceAll('"', '""') + '"'
+  const name = `${q(table.schema ?? 'public')}.${q(table.name)}`
+  const kind = TABLES.find((t) => t.name === table.name)?.kind
+  const what = kind === 'view' ? 'VIEW' : kind === 'materializedView' ? 'MATERIALIZED VIEW' : 'TABLE'
+  if (action.kind === 'drop') return `DROP ${what} ${name};`
+  if (action.kind === 'truncate') return `TRUNCATE TABLE ${name};`
+  return `ALTER ${what} ${name} RENAME TO ${q(action.newName ?? '')};`
+}
+
 async function handle(cmd: string, args: Record<string, any>): Promise<unknown> {
   await delay(cmd.startsWith('browse') || cmd.startsWith('query') ? 40 : 15)
   switch (cmd) {
@@ -492,6 +508,44 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
       return `job${nextId++}`
     case 'job_status':
       return { rows: 1000, bytes: 52000, done: true, cancelled: false, error: null, warning: null }
+    case 'sql_import_start': {
+      const path = String(args.spec?.path ?? '')
+      if (path.includes('missing')) throw failure('io', `No such file: ${path}`)
+      for (const st of split(mockFiles()[path] ?? 'SELECT 1;')) logSql(st.sql)
+      return `job${nextId++}`
+    }
+    case 'tx_begin': {
+      const id = `tx${nextId++}`
+      openTxs.add(id)
+      logSql('BEGIN')
+      return id
+    }
+    case 'tx_commit':
+    case 'tx_rollback':
+      if (!openTxs.delete(args.txId)) throw failure('invalidInput', 'That transaction is no longer open.')
+      logSql(cmd === 'tx_commit' ? 'COMMIT' : 'ROLLBACK')
+      return null
+    case 'file_read_text': {
+      const text = mockFiles()[args.path]
+      if (text === undefined) throw failure('io', `No such file: ${args.path}`)
+      return text
+    }
+    case 'file_write_text':
+      mockFiles()[args.path] = String(args.contents)
+      return null
+    case 'table_admin': {
+      const table = args.table as TableRef
+      const action = args.action as { kind: string; newName?: string }
+      if (action.kind === 'rename' && !action.newName?.trim()) throw failure('invalidInput', 'Enter a new name.')
+      const sql = adminSql(table, action)
+      if (args.preview) return [sql]
+      logSql(sql)
+      const i = TABLES.findIndex((t) => t.name === table.name && (t.schema ?? null) === (table.schema ?? null))
+      if (i >= 0 && action.kind === 'drop') TABLES.splice(i, 1)
+      if (i >= 0 && action.kind === 'rename') TABLES[i] = { ...TABLES[i], name: action.newName!.trim() }
+      if (i >= 0 && action.kind === 'truncate') TABLES[i] = { ...TABLES[i], estimatedRows: 0 }
+      return [sql]
+    }
     case 'csv_preview':
       return { headers: ['id', 'name'], rows: [['1', 'a'], ['2', 'b']], delimiter: ',' }
     case 'query_log_since':

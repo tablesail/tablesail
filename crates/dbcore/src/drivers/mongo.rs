@@ -38,6 +38,8 @@ use crate::value::Row;
 
 use convert::{bson_to_value, db_err, error_code, missing};
 
+pub use render::admin_command;
+
 /// Fails fast when the server is unreachable or the credentials are wrong.
 const SERVER_SELECTION_TIMEOUT: Duration = Duration::from_secs(5);
 /// Longest an exact filtered count may run before we fall back to the estimate.
@@ -784,6 +786,12 @@ impl Driver for MongoDriver {
         rows: Vec<Vec<Option<String>>>,
     ) -> Result<u64> {
         self.insert_csv(table, columns, rows).await
+    }
+
+    async fn pinned(&self, _database: Option<&str>) -> Result<Arc<dyn Driver>> {
+        Err(Error::InvalidInput(
+            "Manual transactions aren't supported for MongoDB.".to_owned(),
+        ))
     }
 
     async fn close(&self) {

@@ -30,7 +30,7 @@ pub type ProgressFn = Arc<dyn Fn(&JobProgress) + Send + Sync>;
 const BATCH: usize = 1000;
 const REPORT_EVERY: Duration = Duration::from_millis(100);
 
-fn progress_of(rows: u64, bytes: u64) -> JobProgress {
+pub(crate) fn progress_of(rows: u64, bytes: u64) -> JobProgress {
     JobProgress {
         rows,
         bytes,
@@ -42,27 +42,27 @@ fn progress_of(rows: u64, bytes: u64) -> JobProgress {
 }
 
 /// Rate-limits progress callbacks.
-struct Reporter {
+pub(crate) struct Reporter {
     progress: ProgressFn,
     last: Instant,
 }
 
 impl Reporter {
-    fn new(progress: ProgressFn) -> Self {
+    pub(crate) fn new(progress: ProgressFn) -> Self {
         Reporter {
             progress,
             last: Instant::now(),
         }
     }
 
-    fn tick(&mut self, rows: u64, bytes: u64) {
+    pub(crate) fn tick(&mut self, rows: u64, bytes: u64) {
         if self.last.elapsed() >= REPORT_EVERY {
             self.last = Instant::now();
             (self.progress)(&progress_of(rows, bytes));
         }
     }
 
-    fn finish(&self, p: &JobProgress) {
+    pub(crate) fn finish(&self, p: &JobProgress) {
         (self.progress)(p);
     }
 }

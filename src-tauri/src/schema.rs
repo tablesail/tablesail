@@ -76,6 +76,11 @@ async fn write_cache(cache_dir: &Path, connection_id: &str, database: &str, snap
     }
 }
 
+/// Forgets the cached snapshot of one database, because its tables changed.
+pub async fn remove_snapshot(cache_dir: &Path, connection_id: &str, database: &str) {
+    let _ = tokio::fs::remove_file(snapshot_path(cache_dir, connection_id, database)).await;
+}
+
 pub async fn remove_cache(cache_dir: &Path, connection_id: &str) {
     let _ = tokio::fs::remove_dir_all(connection_dir(cache_dir, connection_id)).await;
 }
@@ -158,6 +163,28 @@ pub async fn snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn forgets_one_snapshot_and_keeps_the_others() {
+        let dir = std::env::temp_dir().join(format!("tablesail-schema-{}", uuid::Uuid::new_v4()));
+        let snap = |database: &str| SchemaSnapshot {
+            database: database.to_owned(),
+            schemas: BTreeMap::new(),
+            columns: BTreeMap::new(),
+            fetched_at: 1,
+        };
+        write_cache(&dir, "conn", "shop", &snap("shop")).await;
+        write_cache(&dir, "conn", "blog", &snap("blog")).await;
+        write_cache(&dir, "other", "shop", &snap("shop")).await;
+
+        remove_snapshot(&dir, "conn", "shop").await;
+        assert!(read_cached(&dir, "conn", "shop").await.is_none());
+        assert!(read_cached(&dir, "conn", "blog").await.is_some());
+        assert!(read_cached(&dir, "other", "shop").await.is_some());
+        // Already gone: nothing to do, nothing to fail.
+        remove_snapshot(&dir, "conn", "shop").await;
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn file_stems_are_safe_and_distinct() {

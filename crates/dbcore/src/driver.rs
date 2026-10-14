@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use crate::Engine;
 use crate::dialect::Dialect;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::model::{
     ApplyResult, BrowseRequest, ChangeSet, ColumnMeta, Page, RowCount, TableInfo, TableRef,
     TableStructure,
@@ -73,6 +73,32 @@ pub trait Driver: Send + Sync {
         columns: &[String],
         rows: Vec<Vec<Option<String>>>,
     ) -> Result<u64>;
+
+    /// A driver bound to ONE dedicated connection, in `database` when given (default: the
+    /// connection's own), for a manual transaction: BEGIN, the statements and COMMIT/ROLLBACK
+    /// all land on that connection. It goes through the SSH tunnel like the driver it comes
+    /// from, is independent of it (closing one leaves the other open), and statements on it
+    /// take turns. When its connection is lost it does not reconnect, since a new connection
+    /// would no longer hold the transaction. Dropping a cursor of it finishes reading the
+    /// statement in the background rather than discarding the connection. Only `query`,
+    /// `transaction_aborted` and `close` are meant to be used on it.
+    async fn pinned(&self, _database: Option<&str>) -> Result<Arc<dyn Driver>> {
+        Err(Error::InvalidInput(
+            "Manual transactions aren't supported for this connection.".to_owned(),
+        ))
+    }
+
+    /// Whether the transaction open on this (pinned) driver has failed and can only be rolled
+    /// back. Postgres ends a transaction at the first error but keeps accepting COMMIT, which
+    /// then silently rolls back; other engines have no such state.
+    async fn transaction_aborted(&self) -> Result<bool> {
+        Ok(false)
+    }
+
+    /// Forgets the cached table structures and keys. A transaction that changed the schema
+    /// calls this on the driver it was opened from once it has ended, since that driver
+    /// never saw the statements.
+    fn forget_structures(&self) {}
 
     /// Closes pools. Further calls may fail.
     async fn close(&self);

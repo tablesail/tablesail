@@ -29,3 +29,6 @@ thiserror.workspace = true
 # Same reqwest/rustls (ring) the updater already compiles; no second TLS stack.
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+
+[dev-dependencies]
+async-trait.workspace = true

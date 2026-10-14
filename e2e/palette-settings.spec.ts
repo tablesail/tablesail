@@ -8,6 +8,7 @@ import {
   openTableLoaded,
   setSql,
   newQueryTab,
+  sqlEditor,
   sidebar,
   sqlText,
   tabNamed,
@@ -20,6 +21,17 @@ const paletteInput = (page: Page) => page.getByPlaceholder('What would you like 
 const palette = (page: Page) => page.getByRole('dialog', { name: 'Command palette' })
 const options = (page: Page) => palette(page).getByRole('option')
 const dialog = (page: Page, name: string) => page.getByRole('dialog', { name })
+
+/**
+ * Starves requestAnimationFrame the way a busy machine does (parallel test workers, a cargo build): whatever the
+ * app defers to "the next frame" - dialogFocus moves the focus into a dialog that way - stalls for `ms`.
+ */
+async function starveFrames(page: Page, ms = 5000) {
+  await page.evaluate((delay) => {
+    const raf = window.requestAnimationFrame.bind(window)
+    window.requestAnimationFrame = (cb) => window.setTimeout(() => raf(cb), delay)
+  }, ms)
+}
 
 /** Opens the palette and clicks its input, so the tests do not depend on the autofocus bug covered separately. */
 async function openPalette(page: Page, shortcut = `${MOD}+k`) {
@@ -204,18 +216,74 @@ test.describe('command palette', () => {
     await expect(page.getByRole('heading', { name: /^Connections/ })).toBeVisible()
   })
 
-  test.fixme('Enter on "Add database connection" shows the list without also opening a connection', async ({ page }) => {
-    // BUG (rare race, seen about once in 900 runs): the palette runs the action from its input's keydown, which
-    // mounts the connection list synchronously enough for Welcome.svelte's window-level keydown handler (Enter
-    // opens the selected card) to receive that very same Enter. Production, the first card, was opened instead
-    // of just showing the list. Fix idea: ignore keydowns that started before the list mounted, or run the
-    // palette action on keyup / in a microtask.
+  test('Enter on "Add database connection" shows the list without also opening a connection', async ({ page }) => {
+    // The palette runs the action from its input's keydown. Svelte flushes the state change in the microtask
+    // checkpoint that follows that listener, so the connection list mounts - and registers Welcome.svelte's
+    // window-level Enter handler (opens the selected card) - while this very Enter is still on its way up to window.
     await openPalette(page)
     await paletteInput(page).fill('add database')
     await page.keyboard.press('Enter')
     await expect(page.getByRole('heading', { name: /^Connections/ })).toBeVisible()
     await expect(page.getByText('Connecting…')).toHaveCount(0)
     await expect(page.getByText('Connected', { exact: true })).toHaveCount(1) // only the one that was already open
+  })
+
+  test('the Enter that runs a palette action never reaches listeners the action mounts', async ({ page }) => {
+    // Deterministic version of the race above: stand in for Welcome's window-level handler by registering a
+    // keydown listener on window the moment the palette leaves the DOM (a MutationObserver callback runs in the
+    // same microtask checkpoint as Svelte's flush, i.e. before the event reaches window). It must not see the Enter.
+    await openPalette(page)
+    await page.evaluate(() => {
+      const seen: string[] = []
+      ;(window as unknown as { lateEnters: string[] }).lateEnters = seen
+      const late = (e: KeyboardEvent) => {
+        if (e.key === 'Enter') seen.push(`Enter, defaultPrevented=${e.defaultPrevented}`)
+      }
+      new MutationObserver((_, observer) => {
+        if (document.querySelector('[role="dialog"][aria-label="Command palette"]')) return
+        window.addEventListener('keydown', late)
+        observer.disconnect()
+      }).observe(document.body, { childList: true, subtree: true })
+    })
+    await paletteInput(page).fill('add database')
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('heading', { name: /^Connections/ })).toBeVisible()
+    expect(await page.evaluate(() => (window as unknown as { lateEnters: string[] }).lateEnters)).toEqual([])
+  })
+
+  test('Enter that confirms an IME composition does not run the highlighted entry', async ({ page }) => {
+    await openPalette(page)
+    // Chromium flags the key as part of the composition; WebKit (Tauri on macOS) reports it after the composition
+    // has ended, as keyCode 229 with isComposing false.
+    for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+      await paletteInput(page).evaluate((input, extra) => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ...extra, bubbles: true, cancelable: true }))
+      }, init)
+    }
+    await expect(palette(page)).toBeVisible()
+    await expect(tabNamed(page, 'Query 1')).toHaveCount(0)
+  })
+
+  test('Escape that cancels an IME composition leaves the palette open', async ({ page }) => {
+    await openPalette(page)
+    for (const init of [{ isComposing: true }, { keyCode: 229 }]) {
+      await paletteInput(page).evaluate((input, extra) => {
+        input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', ...extra, bubbles: true, cancelable: true }))
+      }, init)
+    }
+    await expect(palette(page)).toBeVisible()
+    await page.keyboard.press('Escape') // a plain Escape still closes it
+    await expect(palette(page)).toHaveCount(0)
+  })
+
+  test('a held-down Enter (key repeat) does not run the highlighted entry', async ({ page }) => {
+    // Holding Enter on the toolbar's search button opens the palette; the repeats that follow land in its input.
+    await openPalette(page)
+    await paletteInput(page).evaluate((input) => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', repeat: true, bubbles: true, cancelable: true }))
+    })
+    await expect(palette(page)).toBeVisible()
+    await expect(tabNamed(page, 'Query 1')).toHaveCount(0)
   })
 
   test('saved queries are listed and open in a new tab with their SQL', async ({ page }) => {
@@ -277,6 +345,103 @@ test.describe('command palette focus', () => {
     await page.keyboard.press(`${MOD}+k`)
     await expect(palette(page)).toBeVisible()
     await expect(paletteInput(page)).toBeFocused({ timeout: 1500 })
+  })
+
+  test('the palette takes the focus in the same task as ⌘K, not a frame later', async ({ page }) => {
+    // Root cause of the flaky focus tests: the focus moved in a requestAnimationFrame callback, so on a busy
+    // machine the keys typed right after ⌘K still went to whatever had the focus (the grid: they edit cells).
+    await openConnection(page)
+    await openTableLoaded(page, 'customers')
+    await gridCell(page, 0, 1).click()
+    await starveFrames(page)
+    await page.keyboard.press(`${MOD}+k`)
+    await page.keyboard.type('sett') // no waiting for the palette in between
+    await expect(paletteInput(page)).toHaveValue('sett', { timeout: 1500 })
+    await expect(options(page).first()).toContainText('Settings')
+    await expect(page.getByRole('grid').locator('input:not([type="checkbox"]), textarea')).toHaveCount(0) // no cell went into edit mode
+  })
+
+  test('typing right after ⌘K in the SQL editor does not change the query', async ({ page }) => {
+    await openConnection(page)
+    await newQueryTab(page)
+    await setSql(page, 'SELECT 1')
+    await starveFrames(page)
+    await page.keyboard.press(`${MOD}+k`)
+    await page.keyboard.type('sett')
+    await expect(paletteInput(page)).toHaveValue('sett', { timeout: 1500 })
+    expect(await sqlText(page)).toBe('SELECT 1')
+  })
+
+  test('an editor that finishes loading while the palette is open does not take the keyboard from it', async ({ page }) => {
+    // Root cause of the flaky "quick actions" test: the SQL editor is a lazy chunk that focuses itself whenever it
+    // arrives. On a busy machine that was after the next ⌘K, and the Enter meant for the palette went to the
+    // editor (a new line) while the palette stayed open. Hold the chunk back until the palette has been used.
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    await page.route('**/src/lib/editor/cm.ts*', async (route) => {
+      await gate
+      await route.continue()
+    })
+    try {
+      await openConnection(page)
+      await openPalette(page)
+      await paletteInput(page).fill('new sql')
+      await page.keyboard.press('Enter')
+      await expect(tabNamed(page, 'Query 1')).toBeVisible()
+      await expect(page.getByText('Loading editor…')).toBeVisible()
+
+      await openPalette(page)
+      await paletteInput(page).fill('sett')
+      release() // the editor arrives now, and focuses itself
+      await expect(sqlEditor(page)).toBeVisible()
+      await expect(paletteInput(page)).toBeFocused()
+      await page.keyboard.press('Enter')
+      await expect(dialog(page, 'Settings')).toBeVisible()
+      expect(await sqlText(page)).toBe('')
+    } finally {
+      release() // a failed run must not leave the route handler waiting
+    }
+  })
+
+  test('Escape right after ⌘K closes the palette before the first frame', async ({ page }) => {
+    await openConnection(page)
+    await openTableLoaded(page, 'customers')
+    await gridCell(page, 0, 1).click()
+    await starveFrames(page)
+    await page.keyboard.press(`${MOD}+k`)
+    await page.keyboard.press('Escape')
+    await expect(palette(page)).toHaveCount(0, { timeout: 1500 })
+  })
+
+  test('closing the palette gives the focus back to the grid, and to the editor', async ({ page }) => {
+    await openConnection(page)
+    await openTableLoaded(page, 'customers')
+    await gridCell(page, 0, 1).click()
+    await page.keyboard.press(`${MOD}+k`)
+    await expect(paletteInput(page)).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('grid')).toBeFocused()
+
+    await newQueryTab(page)
+    await page.keyboard.press(`${MOD}+k`)
+    await expect(paletteInput(page)).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(sqlEditor(page)).toBeFocused()
+  })
+
+  test('clicking the list background, a group heading or the footer keeps the keyboard in the search box', async ({ page }) => {
+    // The dialog itself is focusable (tabindex -1), so a click on a non-focusable part of it used to move the
+    // focus there: typing went nowhere and the arrow keys and Enter, which the search box handles, were dead.
+    await openConnection(page)
+    await openPalette(page)
+    await palette(page).getByText('Quick actions', { exact: true }).click()
+    await expect(paletteInput(page)).toBeFocused()
+    await palette(page).getByText('Esc to close').click()
+    await expect(paletteInput(page)).toBeFocused()
+    await page.keyboard.type('sett')
+    await expect(paletteInput(page)).toHaveValue('sett')
+    await page.keyboard.press('Enter')
+    await expect(dialog(page, 'Settings')).toBeVisible()
   })
 
   test('Escape closes the palette wherever the focus is', async ({ page }) => {

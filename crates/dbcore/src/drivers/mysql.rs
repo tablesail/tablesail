@@ -18,13 +18,14 @@ use sqlx::{
 };
 
 use super::sqlcommon::{
-    CancelState, ESTIMATE_ONLY_ABOVE, IdleList, Lease, Pump, StructureCache, apply_in_transaction,
-    cancel_until_stopped, connection_survives, count_sql, editability, insert_in_transaction,
-    insert_statements, is_unfiltered, meta, select_sql, tiebreak_columns,
+    CancelState, ESTIMATE_ONLY_ABOVE, Idle, IdleList, Lease, Pump, StructureCache,
+    apply_in_transaction, cancel_until_stopped, connection_lost, connection_survives, count_sql,
+    editability, insert_in_transaction, insert_statements, is_unfiltered, meta, select_sql,
+    tiebreak_columns,
 };
 use crate::Engine;
 use crate::changes::change_statements;
-use crate::cursor::{ChannelCursor, EventSender};
+use crate::cursor::ChannelCursor;
 use crate::dialect::Dialect;
 use crate::driver::{CancelHandle, Cursor, Driver};
 use crate::error::{Error, Result};
@@ -43,8 +44,29 @@ const SYSTEM_DATABASES: [&str; 4] = ["information_schema", "performance_schema",
 
 pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
     let (options, default_db) = mysql_options(params)?;
-    let pool = MySqlPoolOptions::new()
-        .max_connections(MAX_CONNECTIONS)
+    let pool = pool_options(MAX_CONNECTIONS).connect_with(options).await?;
+
+    let mode = text_rows(&pool, "SELECT @@SESSION.sql_mode").await?;
+    let backslash_escapes = !cell(&mode[0], 0).contains("NO_BACKSLASH_ESCAPES");
+    let version = text_rows(&pool, "SELECT VERSION()").await?;
+    let version = cell(&version[0], 0);
+    let (version_label, mariadb) = version_label(&version);
+    Ok(Arc::new(MysqlDriver {
+        engine: params.config.engine,
+        pool,
+        dialect: Dialect::Mysql { backslash_escapes },
+        mariadb,
+        version: version_label,
+        default_db,
+        idle: Arc::new(IdleList::new(2)),
+        cache: StructureCache::default(),
+        control: None,
+    }))
+}
+
+fn pool_options(max_connections: u32) -> MySqlPoolOptions {
+    MySqlPoolOptions::new()
+        .max_connections(max_connections)
         .acquire_timeout(Duration::from_secs(15))
         .idle_timeout(Some(Duration::from_secs(600)))
         .after_connect(|conn, _| {
@@ -65,24 +87,6 @@ pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
                 Ok(())
             })
         })
-        .connect_with(options)
-        .await?;
-
-    let mode = text_rows(&pool, "SELECT @@SESSION.sql_mode").await?;
-    let backslash_escapes = !cell(&mode[0], 0).contains("NO_BACKSLASH_ESCAPES");
-    let version = text_rows(&pool, "SELECT VERSION()").await?;
-    let version = cell(&version[0], 0);
-    let (version_label, mariadb) = version_label(&version);
-    Ok(Arc::new(MysqlDriver {
-        engine: params.config.engine,
-        pool,
-        dialect: Dialect::Mysql { backslash_escapes },
-        mariadb,
-        version: version_label,
-        default_db,
-        idle: Arc::new(IdleList::new(2)),
-        cache: StructureCache::default(),
-    }))
 }
 
 /// "8.4.3-MySQL" / "11.8.2-MariaDB" from the raw `VERSION()` string, and whether it is MariaDB.
@@ -186,6 +190,9 @@ struct MysqlDriver {
     default_db: Option<String>,
     idle: Arc<IdleList<PoolConnection<MySql>>>,
     cache: StructureCache,
+    /// Where cancels come from when `pool` has no connection to spare (a pinned driver's pool
+    /// holds only the transaction's connection). Connects lazily, on the first cancel.
+    control: Option<MySqlPool>,
 }
 
 type MysqlLease = Lease<PoolConnection<MySql>>;
@@ -214,6 +221,16 @@ enum MyKind {
 struct MyCol {
     meta: ColumnMeta,
     kind: MyKind,
+}
+
+/// A connection from the pool and its connection id.
+async fn new_connection(pool: &MySqlPool) -> Result<(PoolConnection<MySql>, u64)> {
+    let mut conn = pool.acquire().await?;
+    let id = fetch_text(&mut conn, "SELECT CONNECTION_ID()")
+        .await?
+        .parse::<u64>()
+        .map_err(|_| Error::Other("Could not read the connection id.".to_owned()))?;
+    Ok((conn, id))
 }
 
 /// sqlx reports `_bin` collated text columns as binary because they carry the BINARY
@@ -515,19 +532,20 @@ impl MysqlDriver {
     }
 
     async fn lease(&self) -> Result<MysqlLease> {
+        // On a pinned driver this waits for the statement before; elsewhere it returns at once.
+        let turn = self.idle.wait_turn().await?;
         while let Some(idle) = self.idle.take() {
             let stale = idle.is_stale();
             let mut conn = idle.conn;
             if stale && conn.ping().await.is_err() {
                 continue;
             }
-            return Ok(Lease::new(conn, idle.id, idle.db, self.idle.clone()));
+            return Ok(Lease::new(conn, idle.id, idle.db, self.idle.clone()).with_turn(turn));
         }
-        let mut conn = self.pool.acquire().await?;
-        let id = fetch_text(&mut conn, "SELECT CONNECTION_ID()")
-            .await?
-            .parse::<u64>()
-            .map_err(|_| Error::Other("Could not read the connection id.".to_owned()))?;
+        if self.idle.is_pinned() {
+            return Err(connection_lost());
+        }
+        let (conn, id) = new_connection(&self.pool).await?;
         // A fresh connection starts in the default database.
         Ok(Lease::new(
             conn,
@@ -576,7 +594,7 @@ impl MysqlDriver {
         let state = Arc::new(CancelState::default());
         state.start();
         let cancel = Arc::new(MysqlCancel {
-            pool: self.pool.clone(),
+            pool: self.control.as_ref().unwrap_or(&self.pool).clone(),
             id: lease.id,
             state: state.clone(),
         });
@@ -592,9 +610,21 @@ impl MysqlDriver {
             }
         });
         let sql = sql.to_owned();
-        Ok(Box::new(ChannelCursor::spawn(cancel, move |tx| {
-            run_statement(lease, tx, sql, grid, kind, state)
-        })))
+        let pinned = self.idle.is_pinned();
+        let cursor = ChannelCursor::spawn(cancel, move |tx| {
+            run_statement(
+                lease,
+                Pump::new(tx, grid).keep_reading(pinned),
+                sql,
+                kind,
+                state,
+            )
+        });
+        Ok(Box::new(if pinned {
+            cursor.detach_on_drop()
+        } else {
+            cursor
+        }))
     }
 
     async fn primary_key(&self, table: &TableRef) -> Result<Arc<Vec<String>>> {
@@ -992,10 +1022,54 @@ impl Driver for MysqlDriver {
         insert_in_transaction(&self.pool, &statements).await
     }
 
+    async fn pinned(&self, database: Option<&str>) -> Result<Arc<dyn Driver>> {
+        let database = database.filter(|d| !d.is_empty()).map(str::to_owned);
+        let mut options = (*self.pool.connect_options()).clone();
+        if let Some(db) = &database {
+            options = options.database(db);
+        }
+        let control = pool_options(1)
+            .idle_timeout(Some(Duration::from_secs(30)))
+            .connect_lazy_with(options.clone());
+        let pool = pool_options(1)
+            .min_connections(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
+            .connect_with(options)
+            .await?;
+        let default_db = database.or_else(|| self.default_db.clone());
+        let (conn, id) = new_connection(&pool).await?;
+        let idle = IdleList::pinned();
+        idle.give(Idle {
+            conn,
+            id,
+            db: default_db.clone(),
+            since: Instant::now(),
+        });
+        Ok(Arc::new(MysqlDriver {
+            engine: self.engine,
+            pool,
+            dialect: self.dialect,
+            mariadb: self.mariadb,
+            version: self.version.clone(),
+            default_db,
+            idle: Arc::new(idle),
+            cache: StructureCache::default(),
+            control: Some(control),
+        }))
+    }
+
+    fn forget_structures(&self) {
+        self.cache.clear();
+    }
+
     async fn close(&self) {
         self.cache.clear();
-        self.idle.clear();
+        self.idle.close();
         self.pool.close().await;
+        if let Some(control) = &self.control {
+            control.close().await;
+        }
     }
 }
 
@@ -1005,13 +1079,11 @@ impl Driver for MysqlDriver {
 
 async fn run_statement(
     mut lease: MysqlLease,
-    tx: EventSender,
+    mut pump: Pump,
     sql: String,
-    grid: bool,
     kind: StatementKind,
     state: Arc<CancelState>,
 ) -> Result<()> {
-    let mut pump = Pump::new(tx, grid);
     let outcome = stream_statement(&mut lease, &sql, kind, &mut pump).await;
     state.finish();
     match outcome {
@@ -1043,6 +1115,7 @@ async fn stream_statement(
         let mut stream = sqlx::raw_sql(logged(sql)).fetch_many(&mut *conn);
         while let Some(item) = stream.next().await {
             match item? {
+                Either::Right(_) if pump.gone() => {}
                 Either::Right(row) => {
                     if !pump.in_set() {
                         cols = columns_of(row.columns());
@@ -1063,7 +1136,9 @@ async fn stream_statement(
             }
         }
     }
-    if let Some(affected) = deferred {
+    if let Some(affected) = deferred
+        && !pump.gone()
+    {
         // A query that returned no rows still has columns; prepare it to read them.
         match (&mut *conn)
             .prepare(AssertSqlSafe(sql.to_owned()).into_sql_str())

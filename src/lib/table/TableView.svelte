@@ -25,6 +25,7 @@
   import type { EditorContext, GridSelection } from '../grid/types'
   import Modal from '../ui/Modal.svelte'
   import { formatCount, isTruncatedValue, valueToEditText } from '../format'
+  import { modLabel } from '../util/format'
   import {
     ChangeStore,
     DEFAULT_MARKER,
@@ -42,10 +43,23 @@
   import { inspector } from '../stores/inspector.svelte'
   import { pulse } from '../stores/pulse.svelte'
   import { tabs } from '../stores/tabs.svelte'
+  import { ui } from '../stores/ui.svelte'
   import { load as loadSaved, save as saveSaved } from '../stores/persist'
   import { dialogFocus } from '../ui/dialogFocus'
   import RowMenu from './RowMenu.svelte'
-  import type { RowMenuItem } from './menu'
+  import { copyMenuItems, type RowMenuItem } from './menu'
+  import {
+    copyMessage,
+    pasteInput,
+    pasteMessage,
+    parseClipboard,
+    wasCopiedHere,
+    type ClipCell,
+    type PasteColumn,
+    type PasteStats,
+    type RowFormat,
+    type SkipReason,
+  } from '../util/rowFormats'
   import CellEditor from './editors/CellEditor.svelte'
   import JsonModal from './editors/JsonModal.svelte'
   import TextModal from './editors/TextModal.svelte'
@@ -78,6 +92,10 @@
   const FETCH_THROTTLE_MS = 80
   const MAX_BULK_CELLS = 5000
   const LONG_TEXT_CHARS = 160
+  /** "Copy as" fetches unloaded rows of the selection up to this many. */
+  const MAX_COPY_ROWS = 10_000
+  const MAX_PASTE_ROWS = 5000
+  const MAX_PASTE_CELLS = 100_000
 
   // ---------------------------------------------------------------------------
   // State
@@ -813,6 +831,161 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Copy as ... and paste
+  // ---------------------------------------------------------------------------
+
+  /** Loads rows [from, to) a few pages at a time, so a huge selection does not fire hundreds of requests at once. */
+  async function loadRows(from: number, to: number): Promise<boolean> {
+    const p = pager
+    const gen = dataGen
+    const step = PAGE_SIZE * 8
+    for (let start = from; start < to; start += step) {
+      await p.ensure(start, Math.min(to, start + step))
+      if (gen !== dataGen) return false
+    }
+    return true
+  }
+
+  async function copyAs(format: RowFormat) {
+    const s = selection
+    if (!s || !grid) return
+    // Selected rows still on the server are fetched first (the grid only has what it has scrolled past).
+    const ins = store.insertCount
+    const from = Math.max(0, s.row0 - ins)
+    const to = Math.min(s.row1 + 1 - ins, total, from + MAX_COPY_ROWS)
+    if (to > from && !(await loadRows(from, to))) return
+    // the pending new rows in the selection come on top of the rows that were just fetched
+    const pendingRows = Math.max(0, Math.min(ins, s.row1 + 1) - s.row0)
+    const report = await grid?.copyAs(format, { engine, table, maxRows: pendingRows + MAX_COPY_ROWS })
+    if (!report) return
+    const m = copyMessage(format, report)
+    ui.toast(m.text, m.kind)
+  }
+
+  function pasteColumn(c: number): PasteColumn {
+    const info = colInfo.get(columns[c].name)
+    return { family: info?.family ?? columns[c].family, nullable: info ? info.nullable : true, generated: info?.isGenerated }
+  }
+
+  /**
+   * Pastes clipboard text into the grid as pending edits, starting at the selected cell (a single pasted
+   * value fills a larger selection). Rows past the end of the table become new pending rows.
+   */
+  async function pasteText(text: string) {
+    if (!active || modalOpen || tab !== 'data' || committing || !structure) return
+    if (!editable) {
+      ui.toast(`Can't paste: ${readOnlyReason ?? 'this table is read-only.'}`, 'error')
+      return
+    }
+    const sel = selection
+    if (!sel) {
+      ui.toast('Select a cell first: the paste starts there.', 'info')
+      return
+    }
+    let clip: ClipCell[][] = parseClipboard(text, { tsvOnly: wasCopiedHere(text) })
+    if (clip.length === 0) {
+      ui.toast('The clipboard has no text to paste.', 'info')
+      return
+    }
+
+    const r0 = sel.row0
+    const c0 = sel.col0
+    let fillDropped = 0
+    if (clip.length === 1 && clip[0].length === 1 && (sel.row1 > sel.row0 || sel.col1 > sel.col0)) {
+      // one value over a bigger selection: fill it
+      const cell = clip[0][0]
+      const h = Math.min(sel.row1 - sel.row0 + 1, MAX_PASTE_ROWS)
+      fillDropped = sel.row1 - sel.row0 + 1 - h
+      clip = Array.from({ length: h }, () => Array.from({ length: sel.col1 - sel.col0 + 1 }, () => cell))
+    }
+
+    const width = clip.reduce((m, row) => Math.max(m, row.length), 0)
+    const usable = Math.min(width, columns.length - c0)
+    const maxRows = Math.max(1, Math.min(MAX_PASTE_ROWS, Math.floor(MAX_PASTE_CELLS / Math.max(1, usable))))
+    const droppedRows = fillDropped + Math.max(0, clip.length - maxRows)
+    if (clip.length > maxRows) clip = clip.slice(0, maxRows)
+
+    // Rows of the table that the paste runs over must be loaded before they can be edited.
+    const ins = store.insertCount
+    const from = Math.max(0, r0 - ins)
+    const to = Math.min(r0 + clip.length - ins, total)
+    if (to > from) {
+      const loaded = await loadRows(from, to)
+      if (!loaded || !editable || store.insertCount !== ins) {
+        // the table was reloaded, or rows were added or removed, while the pages came in: the rows above no longer line up
+        ui.toast('The table changed while the rows for the paste were loading. Nothing was pasted.', 'info')
+        return
+      }
+    }
+
+    const stats: PasteStats = { pasted: 0, newRows: 0, skipped: {}, extraColumns: Math.max(0, width - usable), droppedRows }
+    const skip = (reason: SkipReason, n = 1) => (stats.skipped[reason] = (stats.skipped[reason] ?? 0) + n)
+    const created: Map<string, CellInput>[] = []
+
+    clip.forEach((rowCells, i) => {
+      const r = r0 + i
+      const cells = rowCells.slice(0, usable)
+      const inserted = r < ins
+      const existing = !inserted && pager.get(r - ins) !== undefined
+      if (!inserted && !existing && !(countState === 'exact' && r - ins >= total)) {
+        skip('notLoaded', cells.length)
+        return
+      }
+      if (inserted || existing) {
+        cells.forEach((cell, j) => {
+          const c = c0 + j
+          if (!canEditCell(r, c)) return skip(colInfo.get(columns[c].name)?.isGenerated ? 'generated' : 'deleted')
+          const out = pasteInput(cell, pasteColumn(c), engine, inserted)
+          if ('skip' in out) return skip(out.skip)
+          commitCell(r, c, out.input)
+          stats.pasted++
+        })
+        return
+      }
+      // past the last row: a new pending row, one value per pasted column
+      const values = new Map<string, CellInput>()
+      cells.forEach((cell, j) => {
+        const c = c0 + j
+        const out = pasteInput(cell, pasteColumn(c), engine, true)
+        if ('skip' in out) return skip(out.skip)
+        if (out.input.kind === 'default') return
+        values.set(columns[c].name, out.input)
+        stats.pasted++
+      })
+      if (values.size > 0) created.push(values)
+    })
+
+    for (const values of created) store.addInsert(values)
+    stats.newRows = created.length
+
+    const m = pasteMessage(stats)
+    ui.toast(m.text, m.kind)
+
+    await tick()
+    if (usable > 0) {
+      if (created.length > 0) {
+        grid?.scrollToRow(0)
+        grid?.selectRange(0, c0, created.length - 1, c0 + usable - 1)
+      } else {
+        grid?.selectRange(r0, c0, r0 + clip.length - 1, c0 + usable - 1)
+      }
+    }
+    grid?.focus()
+  }
+
+  /** The context menu's Paste: reads the clipboard itself (the ⌘V key delivers the text with the paste event). */
+  async function pasteFromClipboard() {
+    let text: string
+    try {
+      text = await navigator.clipboard.readText()
+    } catch {
+      ui.toast(`Couldn't read the clipboard. Press ${modLabel}+V on the grid instead.`, 'error')
+      return
+    }
+    await pasteText(text)
+  }
+
+  // ---------------------------------------------------------------------------
   // Preview and commit
   // ---------------------------------------------------------------------------
 
@@ -1004,8 +1177,13 @@
         onclick: setNullSelected,
       },
       { separator: true },
-      { label: 'Copy', hint: '⌘C', disabled: !loaded, onclick: () => void grid?.copySelection(false) },
-      { label: 'Copy with headers', disabled: !loaded, onclick: () => void grid?.copySelection(true) },
+      ...copyMenuItems({
+        engine,
+        disabled: !loaded,
+        copy: (withHeader) => void grid?.copySelection(withHeader),
+        copyAs: (format) => void copyAs(format),
+      }),
+      { label: 'Paste', hint: '⌘V', disabled: !editable, onclick: () => void pasteFromClipboard() },
       { label: 'Filter by this value', disabled: !loaded || r < ins, onclick: () => filterByCell(r, c) },
       { separator: true },
       { label: 'Duplicate row', hint: '⌘D', disabled: !editable || !loaded, onclick: () => void duplicateSelected() },
@@ -1027,7 +1205,9 @@
 
   $effect(() => {
     // Focus the grid when this tab becomes the visible one.
-    if (active && tab === 'data' && !modalOpen) untrack(() => void tick().then(() => grid?.focus()))
+    // A tab that opens behind a dialog (e.g. the sidebar's preview while its Drop dialog is up) must not take the focus.
+    if (active && tab === 'data' && !modalOpen)
+      untrack(() => void tick().then(() => !document.activeElement?.closest('[role=dialog], [role=alertdialog]') && grid?.focus()))
   })
 </script>
 
@@ -1088,6 +1268,7 @@
           onSelectionChange={(s) => (selection = s)}
           {onContextMenu}
           onKeyDown={onGridKey}
+          onPaste={(text) => void pasteText(text)}
           emptyMessage={loading ? 'Loading…' : appliedCount > 0 ? 'No rows match the filter' : 'This table is empty'}
         >
           {#snippet editor(ctx: EditorContext)}

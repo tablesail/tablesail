@@ -27,6 +27,8 @@ pub struct ChannelCursor {
     leftover: VecDeque<Row>,
     cancel: Arc<dyn CancelHandle>,
     task: Option<JoinHandle<()>>,
+    /// Dropping the cursor lets the producer finish the statement instead of aborting it.
+    detach_on_drop: bool,
 }
 
 impl ChannelCursor {
@@ -49,7 +51,16 @@ impl ChannelCursor {
             leftover: VecDeque::new(),
             cancel,
             task: Some(task),
+            detach_on_drop: false,
         }
+    }
+
+    /// For producers that must not be aborted (they own the one connection of a manual
+    /// transaction): when the cursor is dropped the task keeps running, reads the statement to
+    /// its end without sending anything, and gives the connection back.
+    pub fn detach_on_drop(mut self) -> Self {
+        self.detach_on_drop = true;
+        self
     }
 }
 
@@ -79,7 +90,9 @@ impl Cursor for ChannelCursor {
 
 impl Drop for ChannelCursor {
     fn drop(&mut self) {
-        if let Some(task) = self.task.take() {
+        if let Some(task) = self.task.take()
+            && !self.detach_on_drop
+        {
             task.abort();
         }
     }

@@ -1,6 +1,10 @@
 <!-- Result tabs (one per result set) plus a Messages tab for statement states, timings and errors. -->
 <script lang="ts">
   import DataGrid from '../grid/DataGrid.svelte'
+  import RowMenu from '../table/RowMenu.svelte'
+  import { copyMenuItems, type RowMenuItem } from '../table/menu'
+  import { copyMessage, type RowFormat } from '../util/rowFormats'
+  import { ui } from '../stores/ui.svelte'
   import type { QueryRunner } from './runner.svelte'
   import type { StatementStatus } from '../types'
   import { formatCount, formatDuration } from '../util/format'
@@ -20,6 +24,8 @@
   let { runner, onExport, tabId = '', session, active = false }: Props = $props()
 
   let gridSel = $state.raw<GridSelection | null>(null)
+  let grid = $state<ReturnType<typeof DataGrid>>()
+  let menu = $state.raw<{ x: number; y: number; items: RowMenuItem[] } | null>(null)
 
   // Ids tying the Result / Messages tabs to the one panel below them.
   const uid = $props.id()
@@ -88,6 +94,35 @@
     return STATE_LABEL[s.state]
   }
 
+  // Cell menu: the same copy entries as a table (INSERT statements use a placeholder table name).
+  async function copyAs(format: RowFormat) {
+    const report = await grid?.copyAs(format, { engine: session?.config.engine ?? 'postgres', table: null })
+    if (!report) return
+    const m = copyMessage(format, report)
+    ui.toast(m.text, m.kind)
+  }
+
+  function openMenu(e: MouseEvent, r: number) {
+    const set = activeSet
+    if (!set) return
+    const loaded = runner.getRow(set.stmt, set.set, r) !== undefined
+    menu = {
+      x: e.clientX,
+      y: e.clientY,
+      items: copyMenuItems({
+        engine: session?.config.engine ?? 'postgres',
+        disabled: !loaded,
+        copy: (withHeader) => void grid?.copySelection(withHeader),
+        copyAs: (format) => void copyAs(format),
+      }),
+    }
+  }
+
+  function closeMenu() {
+    menu = null
+    grid?.focus()
+  }
+
   // Publish the focused result row to the Row inspector while this tab is visible.
   $effect(() => {
     void runner.revision
@@ -141,6 +176,7 @@
       <div class="grid">
         {#key activeSet.key + ':' + runner.runId}
           <DataGrid
+            bind:this={grid}
             columns={info.columns}
             rowCount={runner.rowCount(activeSet.stmt, activeSet.set)}
             getRow={(i) => runner.getRow(activeSet.stmt, activeSet.set, i)}
@@ -148,6 +184,8 @@
             revision={runner.revision}
             label={activeSet.label}
             onSelectionChange={(sel) => (gridSel = sel)}
+            onContextMenu={(e, r) => openMenu(e, r)}
+            onPaste={() => ui.toast('Query results are read-only. Open the table to paste into it.', 'info')}
           />
         {/key}
       </div>
@@ -195,6 +233,10 @@
     {/if}
   </div>
 </div>
+
+{#if menu}
+  <RowMenu x={menu.x} y={menu.y} items={menu.items} onClose={closeMenu} />
+{/if}
 
 <style>
   .results {

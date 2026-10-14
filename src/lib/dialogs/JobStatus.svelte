@@ -5,9 +5,11 @@
   interface Props {
     job: JobPoller
     verb: string
+    /** what the job counts; "rows" for exports and CSV imports */
+    unit?: string
   }
 
-  let { job, verb }: Props = $props()
+  let { job, verb, unit = 'rows' }: Props = $props()
   let p = $derived(job.progress)
 </script>
 
@@ -20,11 +22,11 @@
       {#if p.error}
         <span class="error-text" role="alert">{p.error}</span>
       {:else if p.cancelled}
-        <span class="warn">Cancelled after {formatCount(p.rows)} rows.</span>
+        <span class="warn">Cancelled after {formatCount(p.rows)} {unit}.</span>
       {:else if p.done}
-        <span class="ok">{verb} {formatCount(p.rows)} rows{p.bytes ? ` · ${formatBytes(p.bytes)}` : ''} in {formatDuration(job.elapsedMs)}.</span>
+        <span class="ok">{verb} {formatCount(p.rows)} {unit}{p.bytes ? ` · ${formatBytes(p.bytes)}` : ''} in {formatDuration(job.elapsedMs)}.</span>
       {:else}
-        <span>{formatCount(p.rows)} rows{p.bytes ? ` · ${formatBytes(p.bytes)}` : ''} · {formatDuration(job.elapsedMs)}</span>
+        <span>{formatCount(p.rows)} {unit}{p.bytes ? ` · ${formatBytes(p.bytes)}` : ''} · {formatDuration(job.elapsedMs)}</span>
       {/if}
     </div>
   </div>

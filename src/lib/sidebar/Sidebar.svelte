@@ -4,6 +4,8 @@
   columns), and database/schema pickers at the bottom.
 -->
 <script lang="ts">
+  import { tick } from 'svelte'
+  import TableAdminDialog from '../dialogs/TableAdminDialog.svelte'
   import ContextMenu, { type MenuItem } from '../shell/ContextMenu.svelte'
   import Icon, { type IconName } from '../ui/Icon.svelte'
   import { api } from '../api'
@@ -15,6 +17,7 @@
   import type { SessionInfo, TableInfo, TableKind, TableRef } from '../types'
   import { formatCount } from '../util/format'
   import { plainName, selectStarter } from '../util/sql'
+  import { adminActions, carryTableState, doneVerb, menuLabel, noun, treeKey, type AdminDone, type AdminKind } from './tableAdmin'
 
   interface Props {
     session: SessionInfo
@@ -28,6 +31,10 @@
   let columnInfo = $state<Record<string, { name: string; type: string; pk: boolean }[]>>({})
   let menu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null)
   let chosenSchema = $state<string | null>(null)
+  /** The object a drop / truncate / rename dialog is open for. */
+  let admin = $state<{ table: TableInfo; action: AdminKind } | null>(null)
+  /** A query tab on this connection has an open transaction: it may hold locks that make a drop / rename wait. */
+  let txOpen = $derived(tabs.forSession(session.sessionId).some((t) => t.kind === 'query' && !!t.txId))
 
   let database = $derived(sessions.database(session.sessionId))
   let entry = $derived(sessions.schemaEntry(session.sessionId, database))
@@ -89,7 +96,7 @@
   }
 
   function key(t: TableInfo): string {
-    return t.schema ? `${t.schema}.${t.name}` : t.name
+    return treeKey(t.schema, t.name)
   }
 
   function hasColumns(t: TableInfo): boolean {
@@ -116,16 +123,85 @@
   function tableMenu(t: TableInfo): MenuItem[] {
     const r = ref(t)
     const isTable = t.kind === 'table' || t.kind === 'collection' || t.kind === 'virtual'
+    const engine = session.config.engine
+    const adminItems: MenuItem[] = adminActions(t.kind, engine).map((action) => ({
+      label: menuLabel(action, engine),
+      danger: action !== 'rename',
+      disabled: session.config.readOnly,
+      onclick: () => openAdmin(t, action),
+    }))
     return [
       { label: 'Open', onclick: () => tabs.openTable(session.sessionId, r) },
       { label: 'New query', onclick: () => tabs.newQuery(session.sessionId, database, selectStarter(session.config.engine, r)) },
       { separator: true },
       { label: 'Export…', onclick: () => ui.exportTable(session, { table: r, filters: [], matchAll: true, rawWhere: null, sort: [], columns: [] }) },
       { label: 'Import CSV…', disabled: !isTable || session.config.readOnly, onclick: () => ui.importInto(session, r) },
+      ...(adminItems.length ? [{ separator: true } as MenuItem, ...adminItems] : []),
       { separator: true },
       { label: 'Copy name', onclick: () => void navigator.clipboard?.writeText(plainName(r)) },
       { label: 'Refresh', onclick: () => sessions.refreshSchema(session.sessionId, database) },
     ]
+  }
+
+  function openAdmin(t: TableInfo, action: AdminKind) {
+    if (!adminActions(t.kind, session.config.engine).includes(action)) return
+    if (session.config.readOnly) {
+      ui.toast('This connection is read-only.')
+      return
+    }
+    admin = { table: t, action }
+  }
+
+  /** After the server ran the action: close, retarget or reload the tabs of the object, refresh the tree, say so. */
+  function adminDone(t: TableInfo, done: AdminDone) {
+    // The dialog may have been closed while it waited for a lock, and another one opened since: leave that one.
+    if (admin && key(admin.table) === key(t)) admin = null
+    const engine = session.config.engine
+    const sid = session.sessionId
+    const r = ref(t)
+    const what = noun(t.kind, engine)
+    const k = key(t)
+    // Where the focus goes if it was on a row that disappears: the next row (dropped) or the renamed row.
+    let heir: string | null = null
+    if (done.action !== 'truncate') {
+      delete expanded[k]
+      delete columnInfo[k]
+    }
+    if (done.action === 'drop') {
+      carryTableState(sid, session.config.id, r, null)
+      const visible = sections.flatMap((sec) => (collapsed[sec.title] ? [] : sec.tables)).map(key)
+      const at = visible.indexOf(k)
+      heir = visible[at + 1] ?? visible[at - 1] ?? null
+      tabs.closeTable(sid, r)
+      ui.toast(`${doneVerb('drop', engine)} ${what} “${t.name}”`, 'success')
+    } else if (done.action === 'rename' && done.newName) {
+      carryTableState(sid, session.config.id, r, done.newName)
+      tabs.renameTable(sid, r, done.newName)
+      heir = focusKey = treeKey(t.schema, done.newName)
+      ui.toast(`${doneVerb('rename', engine)} ${what} “${t.name}” to “${done.newName}”`, 'success')
+    } else {
+      tabs.reloadTable(sid, r)
+      ui.toast(`${doneVerb('truncate', engine)} ${what} “${t.name}”`, 'success')
+    }
+    void sessions.refreshSchema(sid, database).then(async () => {
+      await tick()
+      settleFocus(heir)
+    })
+  }
+
+  /** The row that had the focus is gone (dropped, renamed): hand the focus to `wanted`, unless it went elsewhere meanwhile. */
+  function settleFocus(wanted: string | null) {
+    const active = document.activeElement
+    if (!wanted || (active && active !== document.body && active.isConnected)) return
+    listEl?.querySelector<HTMLElement>(`[data-key="${CSS.escape(wanted)}"]`)?.focus({ preventScroll: true })
+  }
+
+  /** Delete / Backspace on a focused object asks to drop it (the dialog still wants the name typed). */
+  function onRowKey(e: KeyboardEvent, t: TableInfo) {
+    if ((e.key !== 'Delete' && e.key !== 'Backspace') || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return
+    if (e.target !== e.currentTarget) return
+    e.preventDefault()
+    openAdmin(t, 'drop')
   }
 
   function setView(v: RailView) {
@@ -274,6 +350,7 @@
               class="row"
               class:active={isActive(t)}
               role="treeitem"
+              data-key={k}
               aria-level="1"
               aria-label={showSchemaInName && t.schema ? `${t.schema}.${t.name}` : t.name}
               aria-selected={isActive(t)}
@@ -283,6 +360,7 @@
               title={`${t.name}${t.estimatedRows != null ? `\n≈ ${formatCount(t.estimatedRows)} rows` : ''}${t.comment ? `\n${t.comment}` : ''}`}
               onclick={() => tabs.openTable(session.sessionId, ref(t), undefined, { preview: true })}
               ondblclick={() => tabs.openTable(session.sessionId, ref(t))}
+              onkeydown={(e) => onRowKey(e, t)}
               oncontextmenu={(e) => {
                 e.preventDefault()
                 menu = { x: e.clientX, y: e.clientY, items: tableMenu(t) }
@@ -411,6 +489,19 @@
 
 {#if menu}
   <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => (menu = null)} />
+{/if}
+
+{#if admin}
+  {@const a = admin}
+  <TableAdminDialog
+    {session}
+    table={ref(a.table)}
+    kind={a.table.kind}
+    action={a.action}
+    {txOpen}
+    onDone={(done) => adminDone(a.table, done)}
+    onClose={() => (admin = null)}
+  />
 {/if}
 
 <style>

@@ -32,7 +32,8 @@
         onRunAll: () => onRunAll(),
       })
       loading = false
-      if (autofocus) handle.focus()
+      // The chunk loads late: never pull focus out of a dialog the user opened meanwhile.
+      if (autofocus && !document.activeElement?.closest('[role=dialog], [role=alertdialog]')) handle.focus()
     })
     return () => {
       disposed = true

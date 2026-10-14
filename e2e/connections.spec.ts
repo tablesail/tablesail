@@ -110,7 +110,7 @@ test.describe('connection list', () => {
   test('right-click opens the same card menu', async ({ page }) => {
     await card(page, 'MariaDB').click({ button: 'right' })
     const items = await page.getByRole('menuitem').allTextContents()
-    expect(items.map((t) => t.trim())).toEqual(['Open', 'Edit…', 'Duplicate', 'Delete…'])
+    expect(items.map((t) => t.trim())).toEqual(['Open', 'Edit…', 'Duplicate', 'Copy as URL', 'Delete…'])
     await page.keyboard.press('Escape')
     await expect(page.getByRole('menu')).toHaveCount(0)
   })

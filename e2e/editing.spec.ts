@@ -29,6 +29,15 @@ async function editFirstName(page: Page, value: string) {
   await page.keyboard.press('Enter')
 }
 
+/**
+ * Waits until the pending edit is stored as a draft and the open table tab is stored too (both are saved after a
+ * short delay), so a reload brings the tab back by itself and its draft prompt comes up with it.
+ */
+async function waitForSavedDraft(page: Page) {
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tablesail:draft:')).length)).toBeGreaterThan(0)
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('tablesail.tabs.c-pg') ?? '')).toContain('"customers"')
+}
+
 test.describe('editing cells', () => {
   test.beforeEach(async ({ page }) => {
     await openConnection(page, 'Local Postgres')
@@ -589,11 +598,11 @@ test.describe('unsaved changes (drafts)', () => {
     await openTableLoaded(page, 'customers')
     await editFirstName(page, 'Alicia')
     await expect(pending(page)).toHaveText('1 change')
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tablesail:draft:')).length)).toBeGreaterThan(0)
+    await waitForSavedDraft(page)
 
     await page.reload()
     await openConnection(page, 'Local Postgres')
-    await page.getByRole('treeitem', { name: 'customers', exact: true }).dblclick()
+    // the customers tab is restored by itself after the reload, and its draft prompt comes up with it
     const prompt = dialog(page, 'Unsaved changes found')
     await expect(prompt).toBeVisible()
     await expect(prompt).toContainText('1 pending change')
@@ -608,9 +617,10 @@ test.describe('unsaved changes (drafts)', () => {
     await openConnection(page, 'Local Postgres')
     await openTableLoaded(page, 'customers')
     await editFirstName(page, 'Alicia')
+    await waitForSavedDraft(page)
     await page.reload()
     await openConnection(page, 'Local Postgres')
-    await page.getByRole('treeitem', { name: 'customers', exact: true }).dblclick()
+    // the customers tab is restored by itself after the reload, and its draft prompt comes up with it
     await dialog(page, 'Unsaved changes found').getByRole('button', { name: 'Discard' }).click()
     await expect(pending(page)).toHaveCount(0)
     await expect(gridCell(page, 0, 2)).toHaveText('Alice')
@@ -621,9 +631,10 @@ test.describe('unsaved changes (drafts)', () => {
     await openConnection(page, 'Local Postgres')
     await openTableLoaded(page, 'customers')
     await editFirstName(page, 'Alicia')
+    await waitForSavedDraft(page)
     await page.reload()
     await openConnection(page, 'Local Postgres')
-    await page.getByRole('treeitem', { name: 'customers', exact: true }).dblclick()
+    // the customers tab is restored by itself after the reload, and its draft prompt comes up with it
     const prompt = dialog(page, 'Unsaved changes found')
     await expect(prompt).toBeVisible()
     await page.keyboard.press('Escape')

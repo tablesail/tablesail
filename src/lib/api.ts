@@ -24,6 +24,8 @@ import type {
   QueryStatus,
   RowCount,
   RowsPage,
+  SqlImport,
+  TableAction,
   SchemaSnapshot,
   Secrets,
   SessionInfo,
@@ -80,13 +82,28 @@ export const api = {
 
   // SQL editor
   sqlSplit: (sql: string, engine: Engine) => invoke<StatementSpan[]>('sql_split', { sql, engine }),
-  queryRun: (sessionId: string, database: string | null, sql: string) =>
-    invoke<QueryRun>('query_run', { sessionId, database, sql }),
+  /** txId: run inside an open manual transaction (see txBegin) instead of on the pool. */
+  queryRun: (sessionId: string, database: string | null, sql: string, txId: string | null = null) =>
+    invoke<QueryRun>('query_run', { sessionId, database, sql, txId }),
   queryStatus: (queryId: string) => invoke<QueryStatus>('query_status', { queryId }),
   queryFetch: (queryId: string, statementIndex: number, setIndex: number, offset: number, limit: number) =>
     invoke<RowsPage>('query_fetch', { queryId, statementIndex, setIndex, offset, limit }),
   queryCancel: (queryId: string) => invoke<void>('query_cancel', { queryId }),
   queryClose: (queryId: string) => invoke<void>('query_close', { queryId }),
+
+  // manual transactions: a dedicated connection held open until commit/rollback.
+  // Closing the session rolls back any open transaction. Not supported on MongoDB.
+  txBegin: (sessionId: string, database: string | null) => invoke<string>('tx_begin', { sessionId, database }),
+  txCommit: (txId: string) => invoke<void>('tx_commit', { txId }),
+  txRollback: (txId: string) => invoke<void>('tx_rollback', { txId }),
+
+  // .sql files (UTF-8 text; reads are capped at 50 MB)
+  fileReadText: (path: string) => invoke<string>('file_read_text', { path }),
+  fileWriteText: (path: string, contents: string) => invoke<void>('file_write_text', { path, contents }),
+
+  // table admin. preview=true returns the statement(s) without running them.
+  tableAdmin: (sessionId: string, table: TableRef, action: TableAction, preview = false) =>
+    invoke<string[]>('table_admin', { sessionId, table, action, preview }),
 
   // editing
   changesPreview: (sessionId: string, changes: ChangeSet) =>
@@ -101,6 +118,8 @@ export const api = {
     invoke<CsvPreview>('csv_preview', { path, delimiter }),
   importStart: (sessionId: string, importSpec: CsvImport) =>
     invoke<string>('import_start', { sessionId, import: importSpec }),
+  sqlImportStart: (sessionId: string, spec: SqlImport) =>
+    invoke<string>('sql_import_start', { sessionId, spec }),
   jobStatus: (jobId: string) => invoke<JobProgress>('job_status', { jobId }),
   jobCancel: (jobId: string) => invoke<void>('job_cancel', { jobId }),
 

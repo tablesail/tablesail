@@ -14,7 +14,11 @@ pub mod model;
 pub mod querylog;
 pub mod session;
 pub mod split;
+pub mod sqlimport;
 pub mod ssh;
+pub mod tableadmin;
+pub mod textfile;
+pub mod transaction;
 pub mod value;
 
 pub use dialect::Dialect;

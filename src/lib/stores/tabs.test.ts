@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryStorage, installStorage } from '../../test/helpers'
 import type { Filter, TableRef } from '../types'
 
@@ -22,6 +22,12 @@ async function fresh(initial: Record<string, unknown> = {}, storage?: MemoryStor
 
 const T = (name: string, schema: string | null = null, database = 'db'): TableRef => ({ database, schema, name })
 const KEY = (conn: string) => `tablesail.tabs.${conn}`
+
+// The first import compiles the svelte runtime and the store, which is slow on a busy machine.
+beforeAll(async () => {
+  await fresh()
+  vi.unstubAllGlobals()
+}, 60_000)
 
 beforeEach(() => {
   vi.useFakeTimers()

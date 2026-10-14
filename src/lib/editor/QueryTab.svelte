@@ -17,8 +17,9 @@
   import { ENGINE_LABEL } from '../util/env'
   import type { SessionInfo, StatementSpan } from '../types'
   import { bytesToUtf16Many } from '../util/utf8'
-  import { formatDuration, modLabel } from '../util/format'
+  import { basename, formatDuration, modLabel } from '../util/format'
   import type { SchemaConfig } from './cm'
+  import { ensureTx, finishTx, isEnding, ranStatements, setManual, txGone, txSupported } from './transaction'
 
   interface Props {
     tab: QueryTab
@@ -35,8 +36,13 @@
   let confirm = $state<{ sql: string; destructive: StatementSpan[] } | null>(null)
   let notice = $state<string | null>(null)
   let saving = $state<{ name: string } | null>(null)
+  /** true while a manual transaction is being begun, so a second Run cannot begin another */
+  let beginning = $state(false)
 
   let engine = $derived(session.config.engine)
+  let manual = $derived(!!tab.manual && txSupported(engine))
+  let txOpen = $derived(!!tab.txId)
+  let txCount = $derived(tab.txStatements ?? 0)
   let entry = $derived(sessions.schemaEntry(session.sessionId, tab.database))
   let schemaCfg = $derived<SchemaConfig>({
     engine,
@@ -52,6 +58,11 @@
 
   $effect(() => {
     if (active) queueMicrotask(() => editor?.focus())
+  })
+
+  // Commit / Roll back can come from outside this tab (shortcut, palette, prompts); they wait for a running statement.
+  $effect(() => {
+    tabs.updateQuery(tab.id, { running: runner.running })
   })
 
   onDestroy(() => {
@@ -90,7 +101,7 @@
   })
 
   async function execute(all: boolean) {
-    if (!editor || runner.running) return
+    if (!editor || runner.running || beginning || isEnding(tab)) return
     notice = null
     try {
       const text = editor.getText()
@@ -117,9 +128,30 @@
 
   async function start(sql: string) {
     confirm = null
-    await runner.run(session.sessionId, tab.database, sql)
+    // Manual mode: the first run opens the transaction, every run goes through it.
+    let txId: string | null = null
+    if (manual) {
+      beginning = true
+      try {
+        txId = await ensureTx(tab)
+      } catch (e) {
+        notice = `Could not start a transaction: ${errorMessage(e)}`
+        return
+      } finally {
+        beginning = false
+      }
+    }
+    await runner.run(session.sessionId, tab.database, sql, txId)
     const st = runner.status
     const ok = !runner.runError && !(st?.statements.some((x) => x.state === 'error') ?? false)
+    if (txId && tab.txId === txId) {
+      if (runner.runError && txGone(runner.runError)) {
+        tabs.updateQuery(tab.id, { txId: null, txStatements: 0 })
+        notice = `The transaction ended: ${runner.runError}`
+      } else {
+        tabs.updateQuery(tab.id, { txStatements: (tab.txStatements ?? 0) + ranStatements(st) })
+      }
+    }
     history.add({
       sql,
       connectionId: session.config.id,
@@ -156,7 +188,8 @@
     if (!saving) return
     const name = saving.name.trim() || `Query ${new Date().toLocaleString()}`
     saved.add({ name, sql: editor?.getText() ?? tab.sql, connectionId: session.config.id, database: tab.database })
-    tabs.updateQuery(tab.id, { title: name })
+    // a file tab keeps its file's name
+    if (!tab.file) tabs.updateQuery(tab.id, { title: name })
     saving = null
     ui.toast(`Saved “${name}”`, 'success')
   }
@@ -177,11 +210,18 @@
     el.addEventListener('pointerup', up)
   }
 
+  async function endTx(how: 'commit' | 'rollback') {
+    await finishTx(tab, how)
+    editor?.focus()
+  }
+
   function exportResult(sql: string) {
     ui.exportQuery(session, tab.database, sql)
   }
 
   let failed = $derived(!runner.running && !!runner.status?.statements.some((s) => s.state === 'error'))
+  /** the last run inside the open transaction had a failing statement (Postgres then needs a rollback) */
+  let txFailed = $derived(txOpen && (failed || (!runner.running && !!runner.runError)))
 
   let summary = $derived.by(() => {
     if (runner.running) return `Running… ${formatDuration(runner.elapsedMs)}`
@@ -196,14 +236,36 @@
 </script>
 
 <div class="query" bind:this={container}>
-  <div class="toolbar">
+  <div class="toolbar" class:txon={txOpen}>
     <div class="title"><Icon name="code" size={14} /> SQL Editor</div>
     <span class="meta">{ENGINE_LABEL[engine]} · {session.config.readOnly ? 'Read only' : session.config.env}</span>
+    {#if tab.file}
+      <span class="file" title={tab.file}><Icon name="code" size={11} /> {basename(tab.file)}</span>
+    {/if}
     <span class="status" class:err={!!notice || !!runner.runError || failed}>{notice ?? summary}</span>
     <span class="spacer"></span>
-    <label class="db" title="Database">
+    {#if txOpen}
+      <span class="txpill" role="status" title="Transaction open ({txCount} statement{txCount === 1 ? '' : 's'}): changes stay uncommitted until you commit or roll back">
+        <i></i>
+        <span class="long">Transaction open · {txCount} statement{txCount === 1 ? '' : 's'}{txFailed ? ' · last run failed' : ''}</span>
+        <span class="short" aria-hidden="true">Tx open · {txCount}{txFailed ? ' · failed' : ''}</span>
+      </span>
+      <button class="tx commit" aria-label="Commit" onclick={() => endTx('commit')} disabled={runner.running} title="Commit the transaction ({modLabel}⇧C)">
+        <Icon name="check" size={12} strokeWidth={2} /> <span class="lbl">Commit</span>
+      </button>
+      <button class="tx" aria-label="Rollback" onclick={() => endTx('rollback')} disabled={runner.running} title="Roll back the transaction ({modLabel}⇧R)">
+        <Icon name="undo" size={12} /> <span class="lbl">Rollback</span>
+      </button>
+    {/if}
+    {#if txSupported(engine)}
+      <div class="seg mode" role="group" aria-label="Transaction mode">
+        <button class:on={!manual} aria-pressed={!manual} onclick={() => setManual(tab, false)} title="Every statement commits as soon as it runs">Auto-commit</button>
+        <button class:on={manual} aria-pressed={manual} onclick={() => setManual(tab, true)} title="Run statements in one transaction until you commit or roll back">Manual</button>
+      </div>
+    {/if}
+    <label class="db" title={txOpen ? 'Commit or roll back before switching database' : 'Database'}>
       <Icon name="database" size={13} />
-      <select value={tab.database} aria-label="Database" onchange={(e) => tabs.updateQuery(tab.id, { database: e.currentTarget.value })}>
+      <select value={tab.database} aria-label="Database" disabled={txOpen} onchange={(e) => tabs.updateQuery(tab.id, { database: e.currentTarget.value })}>
         {#each session.databases as db (db)}
           <option value={db}>{db}</option>
         {/each}
@@ -291,6 +353,7 @@
   }
 
   .toolbar {
+    container: toolbar / inline-size;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -318,6 +381,101 @@
     font-size: 10px;
     color: var(--fg-faint);
     white-space: nowrap;
+  }
+
+  .file {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 200px;
+    font-size: 10px;
+    color: var(--fg-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .mode button {
+    min-height: 20px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .txpill {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    padding: 0 9px;
+    border-radius: 11px;
+    border: 0.5px solid color-mix(in srgb, var(--warning) 55%, transparent);
+    background: color-mix(in srgb, var(--warning) 18%, transparent);
+    color: color-mix(in srgb, var(--warning) 70%, var(--fg));
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .txpill i {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--warning);
+  }
+
+  .txpill .short {
+    display: none;
+  }
+
+  /* Narrower toolbars: with a transaction open, trade the engine label and the button captions for room. */
+  @container toolbar (max-width: 1300px) {
+    .txon .meta,
+    .txon .file {
+      display: none;
+    }
+
+    /* still read out by screen readers */
+    .txpill .long {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip-path: inset(50%);
+    }
+
+    .txpill .short {
+      display: inline;
+    }
+
+    .tx .lbl {
+      display: none;
+    }
+
+    .tx {
+      padding: 0 7px;
+    }
+  }
+
+  .tx {
+    gap: 5px;
+    min-height: 24px;
+    padding: 0 9px;
+    font-size: 11px;
+  }
+
+  .tx.commit {
+    border-color: color-mix(in srgb, var(--accent) 70%, #000);
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+  }
+
+  .tx.commit:hover:not(:disabled) {
+    background: var(--accent);
+    filter: brightness(0.95);
   }
 
   .bare {

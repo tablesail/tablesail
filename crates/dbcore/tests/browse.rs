@@ -2138,15 +2138,106 @@ async fn unknown_columns_are_errors(c: &Ctx) {
     let err = c.driver.browse_page(&req, 0, 5).await.unwrap_err();
     assert!(matches!(err, Error::Database { .. }), "projection: {err:?}");
 }
-each_engine!(unknown_columns_are_errors, postgres, mysql, mariadb);
+each_engine!(unknown_columns_are_errors, sql);
 
 /// SQLite reads an unknown double-quoted identifier as a string literal (its "DQS"
-/// misfeature), so the same requests silently succeed there.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "BUG: SQLite treats a missing double-quoted column as a string literal, so a filter, sort or projection on it silently succeeds instead of failing (sqlite.rs/sqlcommon.rs select_sql)"]
-async fn unknown_columns_are_errors_sqlite() {
-    run_on(Engine::Sqlite, unknown_columns_are_errors).await
+/// misfeature), so the driver checks every column a request names. A miss reads like SQLite's own
+/// message, and nothing legitimate is refused: names match case-insensitively, `rowid` is
+/// there, generated columns and columns with awkward names count.
+async fn sqlite_checks_the_columns_a_request_names(c: &Ctx) {
+    let t = c.make_items("sqlite_cols", 10).await;
+
+    for (what, mut req) in [
+        ("filter", c.browse(&t)),
+        ("sort", c.browse(&t)),
+        ("projection", c.browse(&t)),
+    ] {
+        match what {
+            "filter" => req.filters = vec![filter("no_such_column", FilterOp::Eq, Some("1"))],
+            "sort" => req.sort = vec![sort("no_such_column", true)],
+            _ => req.columns = vec!["id".into(), "no_such_column".into()],
+        }
+        for err in [
+            c.driver
+                .browse_page(&req, 0, 5)
+                .await
+                .map(|_| ())
+                .unwrap_err(),
+            c.driver.count_rows(&req).await.map(|_| ()).unwrap_err(),
+            c.driver.browse_all(&req).await.map(|_| ()).unwrap_err(),
+        ] {
+            match err {
+                Error::Database { message, code, .. } => {
+                    assert_eq!(message, "no such column: no_such_column", "{what}");
+                    assert_eq!(code.as_deref(), Some("1"), "{what}");
+                }
+                other => panic!("{what}: {other:?}"),
+            }
+        }
+    }
+    // The first unknown name is the one reported, wherever it sits.
+    let mut req = c.browse(&t);
+    req.filters = vec![
+        filter("name", FilterOp::Contains, Some("0")),
+        filter("nope_a", FilterOp::Eq, Some("1")),
+    ];
+    req.sort = vec![sort("nope_b", false)];
+    let err = c.driver.browse_page(&req, 0, 5).await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Database { message, .. } if message == "no such column: nope_a"),
+        "{err:?}"
+    );
+
+    // A real column is never refused: case does not matter, `rowid` and its aliases exist.
+    let mut req = c.browse(&t);
+    req.filters = vec![filter("NAME", FilterOp::Contains, Some("0000"))];
+    req.sort = vec![sort("Grp", true), sort("ID", false)];
+    req.columns = vec!["Id".into(), "NAME".into()];
+    let page = c.page(&req, 0, 20).await;
+    assert_eq!(page.rows.len(), 9, "ids 1-9 contain 0000");
+    let mut req = c.browse(&t);
+    req.sort = vec![sort("rowid", true)];
+    assert_eq!(c.page_ids(&req, 0, 3).await, [10, 9, 8]);
+    req.filters = vec![filter("_ROWID_", FilterOp::Lte, Some("2"))];
+    req.columns = vec!["oid".into(), "id".into()];
+    assert_eq!(c.page(&req, 0, 5).await.rows.len(), 2);
+
+    // Columns with awkward names, and generated ones.
+    let odd = c.scratch("sqlite_odd");
+    c.side_exec(&format!(
+        "CREATE TABLE {} (id INTEGER PRIMARY KEY, \"we \"\"ird\"\" col\" TEXT, a INT, b INT GENERATED ALWAYS AS (a * 2) VIRTUAL)",
+        c.qt(&odd)
+    ))
+    .await;
+    c.side_exec(&format!(
+        "INSERT INTO {} (id, \"we \"\"ird\"\" col\", a) VALUES (1, 'x', 5), (2, 'y', 6)",
+        c.qt(&odd)
+    ))
+    .await;
+    let mut req = c.browse(&odd);
+    req.filters = vec![filter("we \"ird\" col", FilterOp::Eq, Some("y"))];
+    assert_eq!(c.page_ids(&req, 0, 5).await, [2]);
+    let mut req = c.browse(&odd);
+    req.filters = vec![filter("b", FilterOp::Eq, Some("10"))];
+    req.sort = vec![sort("b", false)];
+    assert_eq!(c.page_ids(&req, 0, 5).await, [1]);
+    assert_eq!(c.driver.count_rows(&req).await.unwrap().exact, Some(1));
+
+    // A table that does not exist is reported as that, not as a column problem.
+    let mut req = c.browse(&c.name("ghost"));
+    req.filters = vec![filter("anything", FilterOp::Eq, Some("1"))];
+    let err = c.driver.browse_page(&req, 0, 5).await.unwrap_err();
+    assert!(
+        matches!(&err, Error::Database { message, .. } if message.contains("no such table")),
+        "{err:?}"
+    );
+
+    // Raw WHERE text is the user's own SQL and is left alone.
+    let mut req = c.browse(&t);
+    req.raw_where = Some("id <= 2".into());
+    assert_eq!(c.page_ids(&req, 0, 5).await, [1, 2]);
 }
+each_engine!(sqlite_checks_the_columns_a_request_names, sqlite);
 
 async fn filter_values_are_data_not_sql(c: &Ctx) {
     // Values with quotes, wildcards, backslashes and SQL-looking text must be matched literally.

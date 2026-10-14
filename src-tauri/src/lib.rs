@@ -52,11 +52,18 @@ pub fn run() {
             commands::query_fetch,
             commands::query_cancel,
             commands::query_close,
+            commands::tx_begin,
+            commands::tx_commit,
+            commands::tx_rollback,
+            commands::file_read_text,
+            commands::file_write_text,
+            commands::table_admin,
             commands::changes_preview,
             commands::changes_apply,
             commands::export_start,
             commands::csv_preview,
             commands::import_start,
+            commands::sql_import_start,
             commands::job_status,
             commands::job_cancel,
             commands::query_log_since,
@@ -66,6 +73,14 @@ pub fn run() {
             assistant::assistant_key_status,
             assistant::assistant_key_set,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tablesail");
+        .build(tauri::generate_context!())
+        .expect("error while building tablesail")
+        .run(|app, event| {
+            // Open transactions are rolled back and their connections closed before the process
+            // goes, instead of being left to the servers to notice.
+            if let tauri::RunEvent::Exit = event {
+                let state = app.state::<AppState>();
+                tauri::async_runtime::block_on(state.shutdown());
+            }
+        });
 }

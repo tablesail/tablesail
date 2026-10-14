@@ -3,7 +3,7 @@
   the active one raised as a white card. Arrows step between tabs.
 -->
 <script lang="ts">
-  import { tabs } from '../stores/tabs.svelte'
+  import { queryDirty, tabs, type Tab } from '../stores/tabs.svelte'
   import { sessions } from '../stores/sessions.svelte'
   import Icon from '../ui/Icon.svelte'
   import type { SessionInfo } from '../types'
@@ -49,6 +49,13 @@
     next?.focus()
   }
 
+  /** Tooltip: the table's full name, or a query tab's file / title with what is pending in it. */
+  function tooltip(t: Tab): string {
+    if (t.kind === 'table') return [t.table.schema, t.table.name].filter(Boolean).join('.')
+    const notes = [queryDirty(t) && 'unsaved changes', t.txId && 'transaction open'].filter(Boolean)
+    return `${t.file ?? t.title}${notes.length ? ` (${notes.join(', ')})` : ''}`
+  }
+
   function onAux(e: MouseEvent, id: string) {
     if (e.button === 1) {
       e.preventDefault()
@@ -77,7 +84,7 @@
           role="tab"
           aria-selected={t.id === activeId}
           tabindex={t.id === activeId ? 0 : -1}
-          title={t.kind === 'table' ? [t.table.schema, t.table.name].filter(Boolean).join('.') : t.title}
+          title={tooltip(t)}
           onclick={() => tabs.select(t.id)}
           ondblclick={() => tabs.keep(t.id)}
           onauxclick={(e) => onAux(e, t.id)}
@@ -90,6 +97,10 @@
           }}
         >
           <span class="t" class:preview={t.kind === 'table' && t.preview}>{t.title}</span>
+          {#if t.kind === 'query' && (t.txId || queryDirty(t))}
+            <!-- Described by the tab's tooltip; kept out of its accessible name (the title alone). -->
+            <span class="pending" class:tx={!!t.txId} aria-hidden="true"></span>
+          {/if}
         </div>
         <button
           class="close icon"
@@ -197,6 +208,20 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Unsaved file edits (grey) or an open transaction (amber). */
+  .pending {
+    flex: none;
+    width: 6px;
+    height: 6px;
+    margin-left: 6px;
+    border-radius: 50%;
+    background: var(--fg-muted);
+  }
+
+  .pending.tx {
+    background: var(--warning);
   }
 
   /* Preview tab: replaced by the next table you click; double-click to keep it. */

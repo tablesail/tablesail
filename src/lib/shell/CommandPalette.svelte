@@ -5,6 +5,7 @@
 <script lang="ts">
   import Icon, { type IconName } from '../ui/Icon.svelte'
   import { dialogFocus } from '../ui/dialogFocus'
+  import { editorCommands } from '../editor/commands'
   import { inspector } from '../stores/inspector.svelte'
   import { saved } from '../stores/saved.svelte'
   import { sessions } from '../stores/sessions.svelte'
@@ -30,6 +31,8 @@
   let query = $state('')
   let index = $state(0)
   let listEl = $state<HTMLDivElement>()
+  let paletteEl = $state<HTMLDivElement>()
+  let closing = false
   const uid = $props.id()
   const optId = (i: number) => `${uid}-opt-${i}`
 
@@ -46,6 +49,7 @@
         { group: 'Quick actions', icon: 'panel', label: 'Toggle row inspector', run: () => inspector.toggle() },
         { group: 'Quick actions', icon: 'clock', label: 'Show query history', run: () => (ui.rail = 'history') },
         { group: 'Quick actions', icon: 'star', label: 'Show saved queries', run: () => (ui.rail = 'saved') },
+        ...editorCommands(s),
       )
     }
     out.push(
@@ -101,11 +105,42 @@
   })
 
   function run(c: Command) {
+    closing = true
     onClose()
     c.run()
   }
 
+  // The palette owns the keyboard while it is open. Something else can still grab the focus: the SQL editor is a
+  // lazy chunk that focuses itself whenever it finishes loading, which on a busy machine is after the user (or a
+  // test) has opened the palette and typed into it. Typed text, and the Enter that should run a command, then
+  // went to the editor. Give the focus straight back.
+  function keepFocus(e: FocusEvent) {
+    if (closing || !paletteEl || !(e.target instanceof Node) || paletteEl.contains(e.target)) return
+    paletteEl.querySelector('input')?.focus({ preventScroll: true })
+  }
+
+  // The search box takes the keyboard in the same task as the ⌘K that opened the palette. dialogFocus would only
+  // do it a frame later (and Svelte's `autofocus` only when <body> has the focus), and a busy machine can starve
+  // frames for seconds: meanwhile typed text went to the grid cell or editor that still had the focus, and
+  // Escape never reached the palette. Declared after dialogFocus, so that one has already noted where to give
+  // the focus back to.
+  function takeFocus(node: HTMLElement) {
+    node.querySelector('input')?.focus({ preventScroll: true })
+  }
+
+  // Keys that belong to an IME composition (Enter confirms a candidate, Escape cancels it) are not ours. WebKit, the
+  // engine Tauri uses on macOS, delivers the Enter that confirms a candidate after the composition has already ended:
+  // isComposing is false there and keyCode is 229.
+  const composing = (e: KeyboardEvent) => e.isComposing || e.keyCode === 229
+
+  // A click on the list, a group heading or the footer must not take the focus from the search box (the dialog
+  // itself is focusable, so it would): typing, the arrow keys and Enter only work from the box.
+  function keepSearchFocus(e: MouseEvent) {
+    if (!(e.target instanceof HTMLInputElement)) e.preventDefault()
+  }
+
   function onKeydown(e: KeyboardEvent) {
+    if (composing(e)) return
     if (e.key === 'ArrowDown') {
       e.preventDefault()
       index = Math.min(results.length - 1, index + 1)
@@ -113,8 +148,12 @@
       e.preventDefault()
       index = Math.max(0, index - 1)
     } else if (e.key === 'Enter') {
+      // The command usually mounts a view (the connection list...) while this very keydown is still on its way
+      // up: Svelte flushes the state change in the microtask checkpoint right after this listener, so whatever
+      // window-level key handler that view registers would receive this Enter too. It stops here.
       e.preventDefault()
-      if (results[index]) run(results[index])
+      e.stopPropagation()
+      if (!e.repeat && results[index]) run(results[index])
     } else if (e.key === 'Escape') {
       e.preventDefault()
       e.stopPropagation()
@@ -123,18 +162,24 @@
   }
 </script>
 
+<svelte:document onfocusin={keepFocus} />
+
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="overlay" onclick={onClose}>
   <div
     class="palette"
+    bind:this={paletteEl}
     role="dialog"
+    aria-modal="true"
     aria-label="Command palette"
     tabindex="-1"
     use:dialogFocus
+    use:takeFocus
     onclick={(e) => e.stopPropagation()}
+    onmousedown={keepSearchFocus}
     onkeydown={(e) => {
       // Escape from anywhere in the palette (not only the input) closes it.
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !composing(e)) {
         e.preventDefault()
         e.stopPropagation()
         onClose()

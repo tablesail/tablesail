@@ -14,10 +14,17 @@
 //!
 //! Cancelling is cooperative (a `CancellationToken` selected against every await
 //! in the reader) plus a server-side cancel through the cursor's `CancelHandle`.
+//!
+//! A query can run on a connection that belongs to a manual transaction (`RunOptions::tx_id`)
+//! or on one opened for the script alone (`RunOptions::on_done` closes it). Closing the
+//! result of such a query must not end the transaction: statements that already delivered
+//! their first rows are left to finish in the background instead of being cancelled when the
+//! engine would abort the transaction for it (`RunOptions::keep_tx`).
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -48,6 +55,20 @@ pub type OpenFn = Arc<
         + Send
         + Sync,
 >;
+
+/// Runs when the query is over and all its cursors are gone (closes a connection opened for it).
+pub type DoneFn = Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send>> + Send>;
+
+/// Where and how a query runs, beyond its statements.
+#[derive(Default)]
+pub struct RunOptions {
+    /// The manual transaction the statements run in.
+    pub tx_id: Option<String>,
+    /// Cancelling the query must leave the transaction alone: no server-side cancel for a
+    /// statement that has already delivered its rows (Postgres aborts a transaction for it).
+    pub keep_tx: bool,
+    pub on_done: Option<DoneFn>,
+}
 
 struct SetBuf {
     columns: Vec<ColumnMeta>,
@@ -103,6 +124,8 @@ struct Inner {
 pub struct RunningQuery {
     pub id: String,
     pub session_id: String,
+    pub tx_id: Option<String>,
+    keep_tx: bool,
     inner: Mutex<Inner>,
     /// Rows, sets or states changed: wakes `fetch`.
     progress: Notify,
@@ -110,6 +133,10 @@ pub struct RunningQuery {
     want_more: Notify,
     token: CancellationToken,
     created: Instant,
+    on_done: Mutex<Option<DoneFn>>,
+    /// The runner has stopped and `on_done` has run.
+    ended: AtomicBool,
+    ended_notify: Notify,
 }
 
 enum Flow {
@@ -124,10 +151,13 @@ impl RunningQuery {
         session_id: String,
         open: OpenFn,
         spans: &[StatementSpan],
+        options: RunOptions,
     ) -> Arc<RunningQuery> {
         let run = Arc::new(RunningQuery {
             id,
             session_id,
+            tx_id: options.tx_id,
+            keep_tx: options.keep_tx,
             inner: Mutex::new(Inner {
                 stmts: spans
                     .iter()
@@ -149,6 +179,9 @@ impl RunningQuery {
             want_more: Notify::new(),
             token: CancellationToken::new(),
             created: Instant::now(),
+            on_done: Mutex::new(options.on_done),
+            ended: AtomicBool::new(false),
+            ended_notify: Notify::new(),
         });
 
         let worker = tokio::spawn(run_all(run.clone(), open));
@@ -161,8 +194,40 @@ impl RunningQuery {
                     "The query runner stopped unexpectedly.".into(),
                 ));
             }
+            watcher.end().await;
         });
         run
+    }
+
+    /// The runner is done with its cursors: runs `on_done` and wakes `wait_ended`.
+    async fn end(&self) {
+        let done = self
+            .on_done
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(done) = done {
+            done().await;
+        }
+        self.ended.store(true, Ordering::SeqCst);
+        self.ended_notify.notify_waiters();
+    }
+
+    /// Waits (at most `limit`) until the runner has stopped and cleaned up after itself.
+    async fn wait_ended(&self, limit: Duration) {
+        let deadline = tokio::time::Instant::now() + limit;
+        loop {
+            let notified = self.ended_notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.ended.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::select! {
+                _ = &mut notified => {}
+                _ = tokio::time::sleep_until(deadline) => return,
+            }
+        }
     }
 
     pub fn age(&self) -> Duration {
@@ -315,18 +380,48 @@ impl RunningQuery {
     /// Stops the running statement (on the server too) and everything after it.
     /// Rows already loaded stay available.
     pub async fn cancel(&self) {
+        self.stop(self.keep_tx).await;
+    }
+
+    /// Like `cancel`, for when the connection is about to be rolled back or closed: every
+    /// statement is cancelled on the server so nothing holds the connection up, and the call
+    /// returns once the runner has let go of it.
+    pub async fn abort(&self) {
+        self.stop(false).await;
+        self.wait_ended(CANCEL_WAIT).await;
+    }
+
+    /// Stops reading, so the query lets go of its connection, unless a statement is still
+    /// running (then nothing is touched). Rows already loaded stay available.
+    pub async fn settle(&self) {
+        let running = self
+            .lock()
+            .stmts
+            .iter()
+            .any(|s| s.state == StatementState::Running);
+        if !running {
+            self.stop(true).await;
+        }
+    }
+
+    /// `spare_settled`: statements that already delivered their rows are not cancelled on the
+    /// server (only the reading stops).
+    async fn stop(&self, spare_settled: bool) {
         let handles: Vec<Arc<dyn CancelHandle>> = {
             let mut inner = self.lock();
             inner.stopped = true;
             let mut handles = Vec::new();
             for stmt in &mut inner.stmts {
-                if stmt.state == StatementState::Running {
+                let running = stmt.state == StatementState::Running;
+                if running {
                     stmt.state = StatementState::Cancelled;
                     stmt.elapsed_ms = stmt.started.map_or(0, |s| s.elapsed().as_millis() as u64);
                 }
                 // Rows that were never read will not be: tell the grid it has everything there is.
                 stmt.complete_sets(true);
-                handles.extend(stmt.cancel.take());
+                if running || !spare_settled {
+                    handles.extend(stmt.cancel.take());
+                }
             }
             handles
         };
@@ -590,9 +685,11 @@ async fn read_statement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use dbcore::Value;
     use dbcore::cursor::VecCursor;
     use dbcore::model::{StatementKind, TypeFamily};
+    use std::sync::atomic::AtomicUsize;
 
     /// `"n"` yields n rows, `"boom"` fails.
     fn fake() -> OpenFn {
@@ -627,7 +724,13 @@ mod tests {
                 destructive: false,
             })
             .collect();
-        RunningQuery::start("q".into(), "s".into(), fake(), &spans)
+        RunningQuery::start(
+            "q".into(),
+            "s".into(),
+            fake(),
+            &spans,
+            RunOptions::default(),
+        )
     }
 
     #[tokio::test]
@@ -695,5 +798,200 @@ mod tests {
         let started = Instant::now();
         run.fetch(0, 0, 4000, 10).await.unwrap();
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    // --- transactions and dedicated connections ---------------------------------
+
+    struct CountingCancel(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl CancelHandle for CountingCancel {
+        async fn cancel(&self) -> Result<(), Error> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    /// A cursor that counts server-side cancels; `hang` never produces anything.
+    struct Counted {
+        inner: VecCursor,
+        cancels: Arc<AtomicUsize>,
+        hang: bool,
+    }
+
+    #[async_trait]
+    impl Cursor for Counted {
+        async fn next(&mut self, max_rows: usize) -> Result<Option<CursorEvent>, Error> {
+            if self.hang {
+                std::future::pending::<()>().await;
+            }
+            self.inner.next(max_rows).await
+        }
+
+        fn cancel_handle(&self) -> Arc<dyn CancelHandle> {
+            Arc::new(CountingCancel(self.cancels.clone()))
+        }
+    }
+
+    /// `"n"` yields n rows, `"hang"` never answers; every cursor counts its cancels in `cancels`.
+    fn counting(cancels: &Arc<AtomicUsize>) -> OpenFn {
+        let cancels = cancels.clone();
+        Arc::new(move |sql: String| {
+            let cancels = cancels.clone();
+            Box::pin(async move {
+                let n: i64 = sql.parse().unwrap_or(0);
+                let column = ColumnMeta {
+                    name: "n".into(),
+                    type_name: "int".into(),
+                    family: TypeFamily::Integer,
+                };
+                let rows: Vec<Row> = (0..n).map(|i| vec![Value::Int(i)]).collect();
+                Ok(Box::new(Counted {
+                    inner: VecCursor::new(vec![
+                        CursorEvent::Columns(vec![column]),
+                        CursorEvent::Rows(rows),
+                    ]),
+                    cancels,
+                    hang: sql == "hang",
+                }) as Box<dyn Cursor>)
+            })
+        })
+    }
+
+    fn start_counting(
+        sqls: &[&str],
+        cancels: &Arc<AtomicUsize>,
+        options: RunOptions,
+    ) -> Arc<RunningQuery> {
+        let spans: Vec<StatementSpan> = sqls
+            .iter()
+            .map(|s| StatementSpan {
+                start: 0,
+                end: s.len(),
+                sql: s.to_string(),
+                kind: StatementKind::Read,
+                destructive: false,
+            })
+            .collect();
+        RunningQuery::start("q".into(), "s".into(), counting(cancels), &spans, options)
+    }
+
+    fn cancelled(cancels: &Arc<AtomicUsize>) -> usize {
+        cancels.load(Ordering::SeqCst)
+    }
+
+    #[tokio::test]
+    async fn closing_a_result_in_a_transaction_does_not_cancel_it_on_the_server() {
+        // Postgres aborts the whole transaction for a cancelled statement, so a result that
+        // is merely being scrolled is only left alone, not cancelled.
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let keep = RunOptions {
+            tx_id: Some("tx".into()),
+            keep_tx: true,
+            on_done: None,
+        };
+        let run = start_counting(&["5000"], &cancels, keep);
+        run.fetch(0, 0, 0, 10).await.unwrap();
+        run.cancel().await;
+        run.wait_ended(Duration::from_secs(2)).await;
+        assert_eq!(cancelled(&cancels), 0);
+        assert!(run.status().finished);
+
+        // Elsewhere closing it cancels the server side, as before.
+        let run = start_counting(&["5000"], &cancels, RunOptions::default());
+        run.fetch(0, 0, 0, 10).await.unwrap();
+        run.cancel().await;
+        assert_eq!(cancelled(&cancels), 1);
+    }
+
+    #[tokio::test]
+    async fn a_running_statement_is_cancelled_even_in_a_transaction() {
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let keep = RunOptions {
+            tx_id: Some("tx".into()),
+            keep_tx: true,
+            on_done: None,
+        };
+        let run = start_counting(&["hang"], &cancels, keep);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // Settling leaves a statement that is still working alone.
+        run.settle().await;
+        assert_eq!(cancelled(&cancels), 0);
+        assert!(!run.status().finished);
+        // The user's own cancel stops it.
+        run.cancel().await;
+        assert_eq!(cancelled(&cancels), 1);
+        assert_eq!(run.status().statements[0].state, StatementState::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn settling_frees_a_parked_result_and_keeps_its_rows() {
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let keep = RunOptions {
+            tx_id: Some("tx".into()),
+            keep_tx: true,
+            on_done: None,
+        };
+        let run = start_counting(&["5000"], &cancels, keep);
+        run.fetch(0, 0, 0, 10).await.unwrap();
+        run.settle().await;
+        run.wait_ended(Duration::from_secs(2)).await;
+        assert!(
+            run.ended.load(Ordering::SeqCst),
+            "the reader should let go of its cursor"
+        );
+        assert_eq!(cancelled(&cancels), 0);
+        let page = run.fetch(0, 0, 0, 10).await.unwrap();
+        assert_eq!(page.rows.len(), 10);
+    }
+
+    #[tokio::test]
+    async fn abort_cancels_everything_and_waits_for_the_cleanup() {
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let cleaned = Arc::new(AtomicUsize::new(0));
+        let options = RunOptions {
+            tx_id: Some("tx".into()),
+            keep_tx: true,
+            on_done: Some(Box::new({
+                let cleaned = cleaned.clone();
+                move || {
+                    Box::pin(async move {
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        cleaned.fetch_add(1, Ordering::SeqCst);
+                    })
+                }
+            })),
+        };
+        let run = start_counting(&["5000"], &cancels, options);
+        run.fetch(0, 0, 0, 10).await.unwrap();
+        run.abort().await;
+        // Even a statement that had delivered its rows is cancelled, and the cleanup has run.
+        assert_eq!(cancelled(&cancels), 1);
+        assert_eq!(cleaned.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn the_cleanup_runs_once_when_the_script_ends_by_itself() {
+        let cancels = Arc::new(AtomicUsize::new(0));
+        let cleaned = Arc::new(AtomicUsize::new(0));
+        let options = RunOptions {
+            tx_id: None,
+            keep_tx: false,
+            on_done: Some(Box::new({
+                let cleaned = cleaned.clone();
+                move || {
+                    Box::pin(async move {
+                        cleaned.fetch_add(1, Ordering::SeqCst);
+                    })
+                }
+            })),
+        };
+        let run = start_counting(&["1", "2", "3"], &cancels, options);
+        run.wait_ended(Duration::from_secs(2)).await;
+        assert_eq!(cleaned.load(Ordering::SeqCst), 1);
+        assert!(run.status().finished);
+        // Closing afterwards does not run it again.
+        run.abort().await;
+        assert_eq!(cleaned.load(Ordering::SeqCst), 1);
     }
 }

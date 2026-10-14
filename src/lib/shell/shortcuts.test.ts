@@ -1,7 +1,12 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installStorage } from '../../test/helpers'
 
-type Mods = Partial<Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey'>>
+// The file and transaction actions have their own tests; here we only check which key triggers what.
+const actions = vi.hoisted(() => ({ openSqlFile: vi.fn(), saveTab: vi.fn(), saveTabAs: vi.fn(), finishTx: vi.fn() }))
+vi.mock('../editor/sqlFiles', () => ({ openSqlFile: actions.openSqlFile, saveTab: actions.saveTab, saveTabAs: actions.saveTabAs }))
+vi.mock('../editor/transaction', () => ({ finishTx: actions.finishTx }))
+
+type Mods = Partial<Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'shiftKey' | 'repeat'>>
 const ev = (key: string, mods: Mods = {}) => ({ key, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods }) as KeyboardEvent
 
 async function setup(platform: 'MacIntel' | 'Win32') {
@@ -26,6 +31,12 @@ async function setup(platform: 'MacIntel' | 'Win32') {
   }
   return { handleShortcut, sessions, tabs, theme, ui, mod, notMod, enterWorkspace, setAttribute }
 }
+
+// The first import compiles the svelte runtime and the stores, which is slow on a busy machine.
+beforeAll(async () => {
+  await setup('MacIntel')
+  vi.unstubAllGlobals()
+}, 60_000)
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -249,5 +260,134 @@ describe('platform detection', () => {
     const { handleShortcut, ui } = await setup('Win32')
     expect(handleShortcut(ev('k', { metaKey: true }))).toBe(false)
     expect(ui.palette).toBe(false)
+  })
+})
+
+describe.each(['MacIntel', 'Win32'] as const)('SQL file and transaction shortcuts (%s)', (platform) => {
+  beforeEach(() => {
+    for (const fn of Object.values(actions)) fn.mockReset()
+  })
+
+  const session = { sessionId: 's1', config: { engine: 'postgres' } }
+  /** A workspace on session s1 whose active tab is a new query tab. */
+  async function inQuery() {
+    const ctx = await setup(platform)
+    ctx.enterWorkspace()
+    ctx.sessions.list = [session as never]
+    const made = ctx.tabs.newQuery('s1', 'app', 'SELECT 1')
+    return { ...ctx, id: made.id, tab: () => ctx.tabs.active('s1') as import('../stores/tabs.svelte').QueryTab }
+  }
+
+  it('Mod-O opens the file picker for the active session', async () => {
+    const { handleShortcut, mod, sessions } = await inQuery()
+    expect(handleShortcut(ev('o', mod))).toBe(true)
+    expect(actions.openSqlFile).toHaveBeenCalledWith(sessions.list[0])
+  })
+
+  it('Mod-O works from a table tab too, but not without a session', async () => {
+    const { handleShortcut, mod, tabs, sessions } = await inQuery()
+    tabs.openTable('s1', { database: 'app', schema: null, name: 'users' })
+    expect(handleShortcut(ev('o', mod))).toBe(true)
+    sessions.list = []
+    expect(handleShortcut(ev('o', mod))).toBe(false)
+    expect(actions.openSqlFile).toHaveBeenCalledTimes(1)
+  })
+
+  it('Mod-Shift-O is not Open', async () => {
+    const { handleShortcut, mod } = await inQuery()
+    expect(handleShortcut(ev('o', { ...mod, shiftKey: true }))).toBe(false)
+    expect(actions.openSqlFile).not.toHaveBeenCalled()
+  })
+
+  it('Mod-S in a query tab without a file saves it too (saveTab asks for the path)', async () => {
+    const { handleShortcut, mod, tab } = await inQuery()
+    expect(handleShortcut(ev('s', mod))).toBe(true)
+    expect(actions.saveTab).toHaveBeenCalledWith(tab())
+    expect(actions.saveTabAs).not.toHaveBeenCalled()
+  })
+
+  it('a held key does not repeat the action, but is still swallowed', async () => {
+    const { handleShortcut, mod, tabs, id } = await inQuery()
+    tabs.updateQuery(id, { txId: 'tx1' })
+    for (const [key, extra] of [['o', {}], ['s', {}], ['s', { shiftKey: true }], ['c', { shiftKey: true }]] as const) {
+      expect(handleShortcut(ev(key, { ...mod, ...extra, repeat: true }))).toBe(true)
+    }
+    for (const fn of Object.values(actions)) expect(fn).not.toHaveBeenCalled()
+  })
+
+  it('Mod-S in a query tab with a file saves it', async () => {
+    const { handleShortcut, mod, tabs, id, tab } = await inQuery()
+    tabs.updateQuery(id, { file: '/q/a.sql' })
+    expect(handleShortcut(ev('s', mod))).toBe(true)
+    expect(actions.saveTab).toHaveBeenCalledWith(tab())
+  })
+
+  it('Mod-S in a table tab is left to the table view (it commits pending changes)', async () => {
+    const { handleShortcut, mod, tabs } = await inQuery()
+    tabs.openTable('s1', { database: 'app', schema: null, name: 'users' })
+    expect(handleShortcut(ev('s', mod))).toBe(false)
+    expect(handleShortcut(ev('s', { ...mod, shiftKey: true }))).toBe(false)
+    expect(actions.saveTab).not.toHaveBeenCalled()
+    expect(actions.saveTabAs).not.toHaveBeenCalled()
+  })
+
+  it('Mod-Shift-S asks where to save the query, file or not', async () => {
+    const { handleShortcut, mod, tab, tabs, id } = await inQuery()
+    expect(handleShortcut(ev('S', { ...mod, shiftKey: true }))).toBe(true)
+    expect(actions.saveTabAs).toHaveBeenCalledWith(tab())
+    tabs.updateQuery(id, { file: '/q/a.sql' })
+    expect(handleShortcut(ev('s', { ...mod, shiftKey: true }))).toBe(true)
+    expect(actions.saveTabAs).toHaveBeenCalledTimes(2)
+    expect(actions.saveTab).not.toHaveBeenCalled()
+  })
+
+  it('Mod-Shift-C commits and Mod-Shift-R rolls back the open transaction', async () => {
+    const { handleShortcut, mod, tabs, id, tab } = await inQuery()
+    tabs.updateQuery(id, { txId: 'tx1' })
+    expect(handleShortcut(ev('C', { ...mod, shiftKey: true }))).toBe(true)
+    expect(actions.finishTx).toHaveBeenLastCalledWith(tab(), 'commit')
+    expect(handleShortcut(ev('r', { ...mod, shiftKey: true }))).toBe(true)
+    expect(actions.finishTx).toHaveBeenLastCalledWith(tab(), 'rollback')
+  })
+
+  it('Mod-Shift-C in a data grid stays "copy with headers" and never commits the transaction', async () => {
+    const { handleShortcut, mod, tabs, id } = await inQuery()
+    tabs.updateQuery(id, { txId: 'tx1' })
+    const grid = { closest: (selector: string) => (selector === '[role="grid"]' ? {} : null) }
+    const inGrid = (key: string) => ({ ...ev(key, { ...mod, shiftKey: true }), target: grid }) as unknown as KeyboardEvent
+    expect(handleShortcut(inGrid('C'))).toBe(false)
+    expect(actions.finishTx).not.toHaveBeenCalled()
+    // rolling back is not a copy key, so it still works from anywhere
+    expect(handleShortcut(inGrid('r'))).toBe(true)
+    expect(actions.finishTx).toHaveBeenLastCalledWith(expect.anything(), 'rollback')
+  })
+
+  it('the transaction keys are free when nothing is open, so other features can use them', async () => {
+    const { handleShortcut, mod } = await inQuery()
+    expect(handleShortcut(ev('c', { ...mod, shiftKey: true }))).toBe(false)
+    expect(handleShortcut(ev('r', { ...mod, shiftKey: true }))).toBe(false)
+    expect(actions.finishTx).not.toHaveBeenCalled()
+  })
+
+  it('the transaction keys are free in a table tab even if a query tab has a transaction', async () => {
+    const { handleShortcut, mod, tabs, id } = await inQuery()
+    tabs.updateQuery(id, { txId: 'tx1' })
+    tabs.openTable('s1', { database: 'app', schema: null, name: 'users' })
+    expect(handleShortcut(ev('c', { ...mod, shiftKey: true }))).toBe(false)
+    expect(actions.finishTx).not.toHaveBeenCalled()
+  })
+
+  it('plain Mod-R still refreshes the schema on a query tab', async () => {
+    const { handleShortcut, mod, tabs, id } = await inQuery()
+    tabs.updateQuery(id, { txId: 'tx1' })
+    // Mod-R is not the rollback key (that is Mod-Shift-R)
+    expect(handleShortcut(ev('r', mod))).toBe(true)
+    expect(actions.finishTx).not.toHaveBeenCalled()
+  })
+
+  it('none of them are handled on the welcome screen', async () => {
+    const { handleShortcut, mod } = await setup(platform)
+    for (const key of ['o', 's']) expect(handleShortcut(ev(key, mod))).toBe(false)
+    expect(actions.openSqlFile).not.toHaveBeenCalled()
   })
 })

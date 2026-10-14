@@ -19,13 +19,14 @@ use sqlx::{
 };
 
 use super::sqlcommon::{
-    CancelState, ESTIMATE_ONLY_ABOVE, IdleList, Lease, Pump, StructureCache, apply_in_transaction,
-    cancel_until_stopped, connection_survives, count_sql, editability, insert_in_transaction,
-    insert_statements, is_unfiltered, meta, select_sql, tiebreak_columns,
+    CancelState, ESTIMATE_ONLY_ABOVE, Idle, IdleList, Lease, Pump, StructureCache,
+    apply_in_transaction, cancel_until_stopped, connection_lost, connection_survives, count_sql,
+    editability, insert_in_transaction, insert_statements, is_unfiltered, meta, select_sql,
+    tiebreak_columns,
 };
 use crate::Engine;
 use crate::changes::change_statements;
-use crate::cursor::{ChannelCursor, EventSender};
+use crate::cursor::ChannelCursor;
 use crate::dialect::Dialect;
 use crate::driver::{CancelHandle, Cursor, Driver};
 use crate::error::{Error, Result};
@@ -65,6 +66,7 @@ pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
         default_db,
         version: format!("PostgreSQL {version}"),
         cache: StructureCache::default(),
+        pinned: false,
     }))
 }
 
@@ -174,6 +176,9 @@ struct Db {
     pool: PgPool,
     idle: Arc<IdleList<PoolConnection<Postgres>>>,
     types: Mutex<HashMap<u32, PgLabel>>,
+    /// Where cancels come from when `pool` has no connection to spare (a pinned driver's
+    /// pool holds only the transaction's connection). Connects lazily, on the first cancel.
+    control: Option<PgPool>,
 }
 
 impl Db {
@@ -182,8 +187,66 @@ impl Db {
             pool,
             idle: Arc::new(IdleList::new(2)),
             types: Mutex::new(HashMap::new()),
+            control: None,
         }
     }
+
+    /// What a pinned driver has left after `close`: statements on it fail.
+    fn closed(pool: PgPool) -> Self {
+        let idle = IdleList::pinned();
+        idle.close();
+        Db {
+            pool,
+            idle: Arc::new(idle),
+            types: Mutex::new(HashMap::new()),
+            control: None,
+        }
+    }
+
+    /// The database of a pinned driver: its pool's one connection is parked in the idle list for good.
+    async fn pinned(pool: PgPool, options: PgConnectOptions) -> Result<Self> {
+        let (conn, pid) = new_connection(&pool).await?;
+        let idle = IdleList::pinned();
+        idle.give(Idle {
+            conn,
+            id: pid,
+            db: None,
+            since: Instant::now(),
+        });
+        Ok(Db {
+            pool,
+            idle: Arc::new(idle),
+            types: Mutex::new(HashMap::new()),
+            control: Some(
+                PgPoolOptions::new()
+                    .max_connections(1)
+                    .acquire_timeout(Duration::from_secs(15))
+                    .idle_timeout(Some(Duration::from_secs(30)))
+                    .connect_lazy_with(options),
+            ),
+        })
+    }
+
+    /// The pool a cancel of a statement on this database's connection is sent from.
+    fn cancel_pool(&self) -> PgPool {
+        self.control.clone().unwrap_or_else(|| self.pool.clone())
+    }
+}
+
+/// A connection from the pool and its backend process id.
+async fn new_connection(pool: &PgPool) -> Result<(PoolConnection<Postgres>, u64)> {
+    let mut conn = pool.acquire().await?;
+    let row = sqlx::raw_sql("SELECT pg_backend_pid()::text")
+        .fetch_one(&mut *conn)
+        .await?;
+    let pid: u64 = row
+        .try_get_raw(0)
+        .map_err(Error::from)?
+        .as_str()
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| Error::Other("Could not read the backend process id.".to_owned()))?;
+    Ok((conn, pid))
 }
 
 struct PgDriver {
@@ -194,6 +257,8 @@ struct PgDriver {
     dbs: Mutex<HashMap<String, Arc<Db>>>,
     version: String,
     cache: StructureCache,
+    /// A driver made by `pinned`: it only ever talks to `default_db`, over its one connection.
+    pinned: bool,
 }
 
 type PgLease = Lease<PoolConnection<Postgres>>;
@@ -566,7 +631,7 @@ fn estimate(s: &str) -> Option<u64> {
 
 impl PgDriver {
     fn db(&self, database: &str) -> Arc<Db> {
-        let name = if database.is_empty() {
+        let name = if database.is_empty() || self.pinned {
             self.default_db.as_str()
         } else {
             database
@@ -576,6 +641,13 @@ impl PgDriver {
             return db.clone();
         }
         let options = self.options.clone().database(name);
+        if self.pinned {
+            // `close` emptied the map. A closed pinned driver must not open another connection
+            // behind the back of the transaction it held.
+            return Arc::new(Db::closed(
+                pool_options(1, self.timezone.clone()).connect_lazy_with(options),
+            ));
+        }
         let db = Arc::new(Db::new(
             pool_options(OTHER_DB_CONNECTIONS, self.timezone.clone()).connect_lazy_with(options),
         ));
@@ -584,29 +656,31 @@ impl PgDriver {
     }
 
     async fn lease(&self, db: &Arc<Db>) -> Result<PgLease> {
+        // On a pinned driver this waits for the statement before; elsewhere it returns at once.
+        let turn = db.idle.wait_turn().await?;
         while let Some(idle) = db.idle.take() {
             let stale = idle.is_stale();
             let mut conn = idle.conn;
             if stale && conn.ping().await.is_err() {
                 continue;
             }
-            return Ok(Lease::new(conn, idle.id, idle.db, db.idle.clone()));
+            return Ok(Lease::new(conn, idle.id, idle.db, db.idle.clone()).with_turn(turn));
         }
-        let mut conn = db.pool.acquire().await?;
-        let row = sqlx::raw_sql("SELECT pg_backend_pid()::text")
-            .fetch_one(&mut *conn)
-            .await?;
-        let pid: u64 = row
-            .try_get_raw(0)
-            .map_err(Error::from)?
-            .as_str()
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .ok_or_else(|| Error::Other("Could not read the backend process id.".to_owned()))?;
+        if db.idle.is_pinned() {
+            return Err(connection_lost());
+        }
+        let (conn, pid) = new_connection(&db.pool).await?;
         Ok(Lease::new(conn, pid, None, db.idle.clone()))
     }
 
     async fn start(&self, database: &str, sql: &str, grid: bool) -> Result<Box<dyn Cursor>> {
+        if self.pinned && !database.is_empty() && database != self.default_db {
+            return Err(Error::InvalidInput(format!(
+                "This transaction is open in database \"{}\"; commit or roll it back before \
+                 using \"{database}\".",
+                self.default_db
+            )));
+        }
         let db = self.db(database);
         let mut lease = self.lease(&db).await?;
         let kind = statement_kind(sql, DIALECT);
@@ -617,7 +691,7 @@ impl PgDriver {
         let state = Arc::new(CancelState::default());
         state.start();
         let cancel = Arc::new(PgCancel {
-            pool: db.pool.clone(),
+            pool: db.cancel_pool(),
             pid: lease.id,
             state: state.clone(),
         });
@@ -633,9 +707,22 @@ impl PgDriver {
             }
         });
         let sql = sql.to_owned();
-        Ok(Box::new(ChannelCursor::spawn(cancel, move |tx| {
-            run_statement(lease, tx, db, sql, grid, kind, state)
-        })))
+        let pinned = self.pinned;
+        let cursor = ChannelCursor::spawn(cancel, move |tx| {
+            run_statement(
+                lease,
+                Pump::new(tx, grid).keep_reading(pinned),
+                db,
+                sql,
+                kind,
+                state,
+            )
+        });
+        Ok(Box::new(if pinned {
+            cursor.detach_on_drop()
+        } else {
+            cursor
+        }))
     }
 
     async fn primary_key(&self, table: &TableRef) -> Result<Arc<Vec<String>>> {
@@ -1199,6 +1286,59 @@ impl Driver for PgDriver {
         insert_in_transaction(&db.pool, &statements).await
     }
 
+    async fn pinned(&self, database: Option<&str>) -> Result<Arc<dyn Driver>> {
+        let name = database
+            .filter(|d| !d.is_empty())
+            .unwrap_or(&self.default_db)
+            .to_owned();
+        let options = self.options.clone().database(&name);
+        let pool = pool_options(1, self.timezone.clone())
+            .min_connections(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
+            .connect_with(options.clone())
+            .await?;
+        let db = Arc::new(Db::pinned(pool, options.clone()).await?);
+        Ok(Arc::new(PgDriver {
+            options,
+            timezone: self.timezone.clone(),
+            default_db: name.clone(),
+            dbs: Mutex::new(HashMap::from([(name, db)])),
+            version: self.version.clone(),
+            cache: StructureCache::default(),
+            pinned: true,
+        }))
+    }
+
+    async fn transaction_aborted(&self) -> Result<bool> {
+        let db = self.db("");
+        let mut lease = self.lease(&db).await?;
+        let outcome = sqlx::raw_sql("SELECT 1").execute(&mut **lease.conn()).await;
+        match outcome {
+            Ok(_) => {
+                lease.release();
+                Ok(false)
+            }
+            Err(e) => {
+                let err = Error::from(e);
+                if connection_survives(&err) {
+                    lease.release();
+                } else {
+                    lease.discard();
+                }
+                // 25P02: current transaction is aborted, commands ignored until end of transaction block.
+                match err {
+                    Error::Database { code, .. } if code.as_deref() == Some("25P02") => Ok(true),
+                    other => Err(other),
+                }
+            }
+        }
+    }
+
+    fn forget_structures(&self) {
+        self.cache.clear();
+    }
+
     async fn close(&self) {
         self.cache.clear();
         let dbs: Vec<Arc<Db>> = {
@@ -1206,8 +1346,11 @@ impl Driver for PgDriver {
             map.drain().map(|(_, db)| db).collect()
         };
         for db in dbs {
-            db.idle.clear();
+            db.idle.close();
             db.pool.close().await;
+            if let Some(control) = &db.control {
+                control.close().await;
+            }
         }
     }
 }
@@ -1218,14 +1361,12 @@ impl Driver for PgDriver {
 
 async fn run_statement(
     mut lease: PgLease,
-    tx: EventSender,
+    mut pump: Pump,
     db: Arc<Db>,
     sql: String,
-    grid: bool,
     kind: StatementKind,
     state: Arc<CancelState>,
 ) -> Result<()> {
-    let mut pump = Pump::new(tx, grid);
     let outcome = stream_statement(&mut lease, &db, &sql, kind, &mut pump).await;
     state.finish();
     match outcome {
@@ -1258,6 +1399,7 @@ async fn stream_statement(
         let mut stream = sqlx::raw_sql(logged(sql)).fetch_many(&mut *conn);
         while let Some(item) = stream.next().await {
             match item? {
+                Either::Right(_) if pump.gone() => {}
                 Either::Right(row) => {
                     if !pump.in_set() {
                         cols = db.columns_of(row.columns()).await?;
@@ -1277,7 +1419,9 @@ async fn stream_statement(
             }
         }
     }
-    if let Some(affected) = deferred {
+    if let Some(affected) = deferred
+        && !pump.gone()
+    {
         // A query that returned no rows still has columns; ask the server to describe it.
         match (&mut *conn)
             .prepare(AssertSqlSafe(sql.to_owned()).into_sql_str())

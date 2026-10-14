@@ -15,9 +15,9 @@ use sqlx::{
 };
 
 use super::sqlcommon::{
-    CancelState, IdleList, Lease, Pump, StructureCache, apply_in_transaction, cancel_until_stopped,
-    connection_survives, count_sql, editability, insert_in_transaction, insert_statements, meta,
-    select_sql, tiebreak_columns,
+    CancelState, Idle, IdleList, Lease, Pump, StructureCache, apply_in_transaction,
+    cancel_until_stopped, connection_lost, connection_survives, count_sql, editability,
+    insert_in_transaction, insert_statements, meta, select_sql, tiebreak_columns,
 };
 use crate::Engine;
 use crate::changes::change_statements;
@@ -92,6 +92,16 @@ pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
         idle: Arc::new(IdleList::new(2)),
         cache: StructureCache::default(),
     }))
+}
+
+/// A connection from the pool and the address of its handle (what `sqlite3_interrupt` needs).
+async fn new_connection(pool: &SqlitePool) -> Result<(PoolConnection<Sqlite>, u64)> {
+    let mut conn = pool.acquire().await?;
+    let ptr = {
+        let mut handle = conn.lock_handle().await?;
+        handle.as_raw_handle().as_ptr() as usize as u64
+    };
+    Ok((conn, ptr))
 }
 
 struct SqliteDriver {
@@ -348,14 +358,15 @@ impl SqliteDriver {
     }
 
     async fn lease(&self) -> Result<SqliteLease> {
+        // On a pinned driver this waits for the statement before; elsewhere it returns at once.
+        let turn = self.idle.wait_turn().await?;
         if let Some(idle) = self.idle.take() {
-            return Ok(Lease::from_idle(idle, self.idle.clone()));
+            return Ok(Lease::from_idle(idle, self.idle.clone()).with_turn(turn));
         }
-        let mut conn = self.pool.acquire().await?;
-        let ptr = {
-            let mut handle = conn.lock_handle().await?;
-            handle.as_raw_handle().as_ptr() as usize as u64
-        };
+        if self.idle.is_pinned() {
+            return Err(connection_lost());
+        }
+        let (conn, ptr) = new_connection(&self.pool).await?;
         Ok(Lease::new(conn, ptr, None, self.idle.clone()))
     }
 
@@ -379,9 +390,73 @@ impl SqliteDriver {
         });
         let sql = sql.to_owned();
         let cancel: Arc<dyn CancelHandle> = interrupt.clone();
-        Ok(Box::new(ChannelCursor::spawn(cancel, move |tx| {
-            run_statement(lease, tx, sql, grid, kind, interrupt)
-        })))
+        let pinned = self.idle.is_pinned();
+        let cursor = ChannelCursor::spawn(cancel, move |tx| {
+            run_statement(
+                lease,
+                Pump::new(tx, grid).keep_reading(pinned),
+                sql,
+                kind,
+                interrupt,
+            )
+        });
+        Ok(Box::new(if pinned {
+            cursor.detach_on_drop()
+        } else {
+            cursor
+        }))
+    }
+
+    /// Every column of the table, hidden and generated ones included (empty when the table
+    /// does not exist). `fresh` skips the cache.
+    async fn column_names(&self, table: &TableRef, fresh: bool) -> Result<Arc<Vec<String>>> {
+        if !fresh && let Some(names) = self.cache.column_names(table) {
+            return Ok(names);
+        }
+        let mut catalog = Catalog::open(&self.pool, &table.database).await?;
+        let rows = catalog
+            .rows(&format!(
+                "PRAGMA {}.table_xinfo({})",
+                DIALECT.quote_ident(db_name(&table.database)),
+                DIALECT.quote_string(&table.name)
+            ))
+            .await?;
+        let names: Vec<String> = rows.iter().map(|r| cell(r, 1)).collect();
+        if names.is_empty() {
+            return Ok(Arc::new(names)); // no such table: the query itself will say so
+        }
+        Ok(self.cache.put_column_names(table, names))
+    }
+
+    /// SQLite reads a double-quoted name that is not a column as a string literal, so a filter,
+    /// sort or projection on a column the table lacks would silently succeed. Every column the
+    /// request names is therefore checked here, with SQLite's own message for a miss.
+    async fn check_columns(&self, request: &BrowseRequest) -> Result<()> {
+        let named: Vec<&str> = request
+            .filters
+            .iter()
+            .map(|f| f.column.as_str())
+            .chain(request.sort.iter().map(|s| s.column.as_str()))
+            .chain(request.columns.iter().map(String::as_str))
+            .collect();
+        if named.is_empty() {
+            return Ok(());
+        }
+        let mut known = self.column_names(&request.table, false).await?;
+        let mut missing = first_unknown(&named, &known);
+        if missing.is_some() {
+            // The table may have been altered since the names were cached.
+            known = self.column_names(&request.table, true).await?;
+            missing = first_unknown(&named, &known);
+        }
+        match missing {
+            Some(name) if !known.is_empty() => Err(Error::Database {
+                message: format!("no such column: {name}"),
+                code: Some("1".to_owned()),
+                statement: None,
+            }),
+            _ => Ok(()),
+        }
     }
 
     async fn primary_key(&self, table: &TableRef) -> Result<Arc<Vec<String>>> {
@@ -597,6 +672,17 @@ impl SqliteDriver {
     }
 }
 
+/// The first of `named` that is not among `known` (names compare case-insensitively, and the
+/// implicit rowid aliases are always there).
+fn first_unknown<'a>(named: &[&'a str], known: &[String]) -> Option<&'a str> {
+    named.iter().copied().find(|name| {
+        !known.iter().any(|k| k.eq_ignore_ascii_case(name))
+            && !["rowid", "_rowid_", "oid"]
+                .iter()
+                .any(|alias| alias.eq_ignore_ascii_case(name))
+    })
+}
+
 fn primary_key_of(table_info_rows: &TextRows) -> Vec<String> {
     // cid, name, type, notnull, dflt_value, pk
     let mut pk: Vec<(i64, String)> = table_info_rows
@@ -715,6 +801,7 @@ impl Driver for SqliteDriver {
 
     async fn browse_page(&self, request: &BrowseRequest, offset: u64, limit: u32) -> Result<Page> {
         let started = Instant::now();
+        self.check_columns(request).await?;
         // The key orders unsorted pages and breaks ties between sorted ones; a table
         // without one is tie-broken by its columns.
         let mut key = self.primary_key(&request.table).await?;
@@ -753,6 +840,7 @@ impl Driver for SqliteDriver {
     }
 
     async fn count_rows(&self, request: &BrowseRequest) -> Result<RowCount> {
+        self.check_columns(request).await?;
         let sql = count_sql(DIALECT, request)?;
         let row = sqlx::raw_sql(logged(sql)).fetch_one(&self.pool).await?;
         let n: i64 = row.try_get_unchecked(0)?;
@@ -763,6 +851,7 @@ impl Driver for SqliteDriver {
     }
 
     async fn browse_all(&self, request: &BrowseRequest) -> Result<Box<dyn Cursor>> {
+        self.check_columns(request).await?;
         let sql = select_sql(DIALECT, request, &[], None)?;
         self.start(&sql, false).await
     }
@@ -792,8 +881,41 @@ impl Driver for SqliteDriver {
         insert_in_transaction(&self.pool, &statements).await
     }
 
+    async fn pinned(&self, _database: Option<&str>) -> Result<Arc<dyn Driver>> {
+        // The same options: a file opens again, and an in-memory database (a named shared-cache
+        // one) is the same database as long as the original connection stays open. Attached
+        // databases belong to a connection and are not carried over.
+        let options = (*self.pool.connect_options()).clone();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .min_connections(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
+            .acquire_timeout(Duration::from_secs(15))
+            .connect_with(options)
+            .await?;
+        let (conn, ptr) = new_connection(&pool).await?;
+        let idle = IdleList::pinned();
+        idle.give(Idle {
+            conn,
+            id: ptr,
+            db: None,
+            since: Instant::now(),
+        });
+        Ok(Arc::new(SqliteDriver {
+            pool,
+            version: self.version.clone(),
+            idle: Arc::new(idle),
+            cache: StructureCache::default(),
+        }))
+    }
+
+    fn forget_structures(&self) {
+        self.cache.clear();
+    }
+
     async fn close(&self) {
-        self.idle.clear();
+        self.idle.close();
         self.pool.close().await;
     }
 }
@@ -801,13 +923,11 @@ impl Driver for SqliteDriver {
 /// The producer task of one statement.
 async fn run_statement(
     mut lease: SqliteLease,
-    tx: crate::cursor::EventSender,
+    mut pump: Pump,
     sql: String,
-    grid: bool,
     kind: StatementKind,
     interrupt: Arc<Interrupt>,
 ) -> Result<()> {
-    let mut pump = Pump::new(tx, grid);
     let outcome = stream_statement(&mut lease, &sql, kind, &mut pump).await;
     interrupt.stop();
     match outcome {
@@ -845,6 +965,7 @@ async fn stream_statement(
         let mut stream = sqlx::raw_sql(logged(sql)).fetch_many(&mut *conn);
         while let Some(item) = stream.next().await {
             match item? {
+                Either::Right(_) if pump.gone() => {}
                 Either::Right(row) => {
                     if !pump.in_set() {
                         cols = columns_of_row(&row);
@@ -867,7 +988,9 @@ async fn stream_statement(
             }
         }
     }
-    if let Some(affected) = deferred {
+    if let Some(affected) = deferred
+        && !pump.gone()
+    {
         // A query without rows still has columns; ask SQLite for them.
         let described = (&mut *conn)
             .prepare(AssertSqlSafe(sql.to_owned()).into_sql_str())
@@ -990,6 +1113,57 @@ mod tests {
             out.push(e);
         }
         out
+    }
+
+    #[test]
+    fn finds_the_first_column_a_table_lacks() {
+        let known: Vec<String> = ["id", "Name", "we\"ird"].map(String::from).to_vec();
+        assert_eq!(first_unknown(&["id", "NAME", "we\"ird"], &known), None);
+        assert_eq!(first_unknown(&["id", "nope", "nada"], &known), Some("nope"));
+        // The implicit rowid aliases are columns of every rowid table.
+        assert_eq!(first_unknown(&["rowid", "_ROWID_", "Oid"], &known), None);
+        assert_eq!(first_unknown(&[], &known), None);
+    }
+
+    #[tokio::test]
+    async fn requests_naming_missing_columns_fail_like_sqlite_does() {
+        let d = test_driver().await;
+        let mut r = req("people");
+        r.filters = vec![Filter {
+            column: "nope".into(),
+            op: FilterOp::Eq,
+            value: Some("1".into()),
+        }];
+        for err in [
+            d.browse_page(&r, 0, 5).await.map(|_| ()).unwrap_err(),
+            d.count_rows(&r).await.map(|_| ()).unwrap_err(),
+            d.browse_all(&r).await.map(|_| ()).unwrap_err(),
+        ] {
+            assert!(
+                matches!(&err, Error::Database { message, code, .. }
+                    if message == "no such column: nope" && code.as_deref() == Some("1")),
+                "{err:?}"
+            );
+        }
+        // Generated, hidden and implicit columns are fine; so is a view's.
+        let mut r = req("people");
+        r.sort = vec![Sort {
+            column: "full_name".into(),
+            descending: false,
+        }];
+        r.columns = vec!["rowid".into(), "FULL_NAME".into()];
+        assert_eq!(d.browse_page(&r, 0, 5).await.unwrap().rows.len(), 3);
+        let mut r = req("adults");
+        r.columns = vec!["name".into()];
+        assert_eq!(d.browse_page(&r, 0, 5).await.unwrap().rows.len(), 1);
+        // A table that isn't there is the query's problem to report.
+        let mut r = req("nope");
+        r.columns = vec!["a".into()];
+        let err = d.browse_page(&r, 0, 5).await.map(|_| ()).unwrap_err();
+        assert!(
+            matches!(&err, Error::Database { message, .. } if message.contains("no such table")),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -1250,6 +1424,62 @@ mod tests {
         };
         assert_eq!(rows[0][0], Value::Int(1));
         collect(d.query(None, "ROLLBACK").await.unwrap()).await;
+    }
+
+    async fn count_no_pk(d: &Arc<dyn Driver>) -> Value {
+        let events = collect(d.query(None, "SELECT count(*) FROM no_pk").await.unwrap()).await;
+        let CursorEvent::Rows(rows) = &events[1] else {
+            panic!("{events:?}")
+        };
+        rows[0][0].clone()
+    }
+
+    #[tokio::test]
+    async fn a_pinned_connection_works_on_an_in_memory_database() {
+        let d = test_driver().await;
+        let tx = d.pinned(None).await.unwrap();
+
+        // The in-memory database is shared (named, shared cache), so the second connection
+        // sees the same tables; a rolled back transaction leaves nothing behind.
+        assert_eq!(count_no_pk(&tx).await, Value::Int(1));
+        for sql in ["BEGIN", "INSERT INTO no_pk VALUES ('tx', '1')"] {
+            collect(tx.query(None, sql).await.unwrap()).await;
+        }
+        assert_eq!(count_no_pk(&tx).await, Value::Int(2));
+        collect(tx.query(None, "ROLLBACK").await.unwrap()).await;
+        assert_eq!(count_no_pk(&d).await, Value::Int(1));
+
+        // A committed one shows up on the session's own connections.
+        for sql in ["BEGIN", "INSERT INTO no_pk VALUES ('tx', '2')", "COMMIT"] {
+            collect(tx.query(None, sql).await.unwrap()).await;
+        }
+        assert_eq!(count_no_pk(&d).await, Value::Int(2));
+
+        // Closing the pinned driver leaves the session's driver and the database alone, and
+        // the pinned one is unusable afterwards instead of reconnecting.
+        tx.close().await;
+        assert!(tx.query(None, "SELECT 1").await.is_err());
+        assert_eq!(count_no_pk(&d).await, Value::Int(2));
+    }
+
+    #[tokio::test]
+    async fn a_pinned_connection_keeps_an_open_transaction_through_abandoned_results() {
+        let d = test_driver().await;
+        let tx = d.pinned(None).await.unwrap();
+        for sql in ["BEGIN", "INSERT INTO no_pk VALUES ('tx', '1')"] {
+            collect(tx.query(None, sql).await.unwrap()).await;
+        }
+        // A result bigger than the cursor's buffer, dropped after its first rows.
+        let big = "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000) \
+                   SELECT i FROM n";
+        let mut cursor = tx.query(None, big).await.unwrap();
+        while !matches!(cursor.next(10).await.unwrap(), Some(CursorEvent::Rows(_))) {}
+        drop(cursor);
+        // The next statement waits for the rest to be read, and runs in the same transaction.
+        assert_eq!(count_no_pk(&tx).await, Value::Int(2));
+        collect(tx.query(None, "ROLLBACK").await.unwrap()).await;
+        assert_eq!(count_no_pk(&tx).await, Value::Int(1));
+        tx.close().await;
     }
 
     #[tokio::test]

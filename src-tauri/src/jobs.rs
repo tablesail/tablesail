@@ -12,10 +12,21 @@ pub struct Job {
     progress: Mutex<JobProgress>,
     finished_at: Mutex<Option<Instant>>,
     pub cancel: CancellationToken,
+    /// The connection the job belongs to, for jobs that must not outlive it.
+    session_id: Option<String>,
 }
 
 impl Job {
     pub fn new() -> Arc<Job> {
+        Job::build(None)
+    }
+
+    /// A job that is cancelled when the connection `session_id` is closed.
+    pub fn for_session(session_id: &str) -> Arc<Job> {
+        Job::build(Some(session_id.to_owned()))
+    }
+
+    fn build(session_id: Option<String>) -> Arc<Job> {
         Arc::new(Job {
             progress: Mutex::new(JobProgress {
                 rows: 0,
@@ -27,7 +38,12 @@ impl Job {
             }),
             finished_at: Mutex::new(None),
             cancel: CancellationToken::new(),
+            session_id,
         })
+    }
+
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
     }
 
     pub fn snapshot(&self) -> JobProgress {

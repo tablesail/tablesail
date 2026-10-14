@@ -234,10 +234,10 @@ test.describe('sidebar', () => {
     await expect(sidebar(page).getByRole('combobox', { name: 'Database' })).toHaveValue('tablesail_other')
   })
 
-  test('table context menu: Open, New query, Export, Import, Copy name, Refresh', async ({ page }) => {
+  test('table context menu: Open, New query, Export, Import, Rename, Truncate, Drop, Copy name, Refresh', async ({ page }) => {
     await tableRow(page, 'customers').click({ button: 'right' })
     const items = (await page.getByRole('menuitem').allTextContents()).map((t) => t.trim())
-    expect(items).toEqual(['Open', 'New query', 'Export…', 'Import CSV…', 'Copy name', 'Refresh'])
+    expect(items).toEqual(['Open', 'New query', 'Export…', 'Import CSV…', 'Rename…', 'Truncate…', 'Drop…', 'Copy name', 'Refresh'])
     await page.getByRole('menuitem', { name: 'New query' }).click()
     await expect(page.getByRole('tab', { name: /Query 1/ })).toBeVisible()
     await expect(page.locator('.tab-body:not([hidden]) .cm-content')).toContainText('customers')
@@ -472,6 +472,9 @@ test.describe('toolbar menu', () => {
     await page.getByRole('button', { name: 'Menu' }).click()
     const items = (await page.getByRole('menuitem').allTextContents()).map((t) => t.trim())
     expect(items).toEqual([
+      expect.stringMatching(/^Open SQL file…/),
+      expect.stringMatching(/^Save to file…/),
+      'Import SQL dump…',
       expect.stringMatching(/^(Dark|Light) appearance/),
       'Use system appearance',
       'Query history',

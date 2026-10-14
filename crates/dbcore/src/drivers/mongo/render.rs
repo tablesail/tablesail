@@ -6,6 +6,7 @@ use mongodb::bson::spec::BinarySubtype;
 use mongodb::bson::{Bson, Document};
 
 use super::convert::format_millis;
+use crate::model::TableAction;
 
 fn is_identifier(s: &str) -> bool {
     let mut chars = s.chars();
@@ -115,6 +116,18 @@ pub fn collection_ref(name: &str) -> String {
         format!("db.{name}")
     } else {
         format!("db.getCollection({})", quote(name))
+    }
+}
+
+/// The shell command that drops, empties or renames a collection.
+pub fn admin_command(collection: &str, action: &TableAction) -> String {
+    let target = collection_ref(collection);
+    match action {
+        TableAction::Drop => format!("{target}.drop()"),
+        TableAction::Truncate => format!("{target}.deleteMany({{}})"),
+        TableAction::Rename { new_name } => {
+            format!("{target}.renameCollection({})", quote(new_name))
+        }
     }
 }
 
