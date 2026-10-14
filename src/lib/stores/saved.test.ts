@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installStorage } from '../../test/helpers'
 import type { SavedQuery } from './saved.svelte'
 
-const KEY = 'tablesoft.savedQueries'
+const KEY = 'tablesail.savedQueries'
 
 async function fresh(initial: Record<string, unknown> = {}) {
   vi.resetModules()

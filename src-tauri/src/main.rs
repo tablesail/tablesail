@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    tablesoft_lib::run();
+    tablesail_lib::run();
 }

@@ -1,6 +1,6 @@
 [package]
 name = "dbcore"
-description = "Database drivers and query engine for TableSoft"
+description = "Database drivers and query engine for TableSail"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

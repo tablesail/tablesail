@@ -1,7 +1,7 @@
 // The "nasty schema" for MongoDB: every BSON type, shapeless collections,
-// awkward names and a 1M-document collection. Runs in mongosh against `tablesoft`.
+// awkward names and a 1M-document collection. Runs in mongosh against `tablesail`.
 
-const tdb = db.getSiblingDB('tablesoft');
+const tdb = db.getSiblingDB('tablesail');
 
 // ---------------------------------------------------------------------------
 // Every BSON type

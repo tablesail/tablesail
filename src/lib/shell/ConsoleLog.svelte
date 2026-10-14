@@ -33,7 +33,7 @@
 
   const MAX_ENTRIES = 2000
   const POLL_MS = 700
-  const HIGHLIGHT_KEY = 'tablesoft.console.highlight'
+  const HIGHLIGHT_KEY = 'tablesail.console.highlight'
 
   function readHighlight(): boolean {
     try {

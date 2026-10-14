@@ -43,7 +43,7 @@ interface SavedTabs {
   active: number
 }
 
-const SAVE_KEY = (connectionId: string) => `tablesoft.tabs.${connectionId}`
+const SAVE_KEY = (connectionId: string) => `tablesail.tabs.${connectionId}`
 const SAVE_DELAY_MS = 400
 
 class TabsStore {

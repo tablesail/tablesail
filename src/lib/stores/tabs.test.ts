@@ -21,7 +21,7 @@ async function fresh(initial: Record<string, unknown> = {}, storage?: MemoryStor
 }
 
 const T = (name: string, schema: string | null = null, database = 'db'): TableRef => ({ database, schema, name })
-const KEY = (conn: string) => `tablesoft.tabs.${conn}`
+const KEY = (conn: string) => `tablesail.tabs.${conn}`
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -650,7 +650,7 @@ describe('tabs: persistence', () => {
     const { tabs, settleSave, storage } = await fresh()
     tabs.openTable('s1', T('a'))
     settleSave()
-    expect([...storage.data.keys()].filter((k) => k.startsWith('tablesoft.tabs.'))).toEqual([])
+    expect([...storage.data.keys()].filter((k) => k.startsWith('tablesail.tabs.'))).toEqual([])
   })
 
   it('writes the tabs 400 ms after a change, not before', async () => {

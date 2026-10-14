@@ -1,4 +1,4 @@
-# Releasing TableSoft
+# Releasing TableSail
 
 Releases are built by `.github/workflows/release.yml` when a `v*` tag is pushed.
 It builds macOS (Apple Silicon and Intel), Windows and Linux bundles, signs the
@@ -10,12 +10,12 @@ GitHub Release.
 1. **Updater keys.** Generate a signing key pair:
 
    ```sh
-   npx tauri signer generate -w ~/.tauri/tablesoft.key
+   npx tauri signer generate -w ~/.tauri/tablesail.key
    ```
 
    Keep the private key and its password safe. Losing them means installed apps
    can no longer verify updates.
-2. **Public key.** Paste the contents of `tablesoft.key.pub` into
+2. **Public key.** Paste the contents of `tablesail.key.pub` into
    `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`, replacing
    `REPLACE_WITH_TAURI_SIGNER_PUBLIC_KEY`.
 3. **Repository secrets** (Settings, Secrets and variables, Actions):
@@ -23,7 +23,7 @@ GitHub Release.
    - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: its password
 4. **Endpoint.** In `src-tauri/tauri.conf.json` replace `OWNER/REPO` in
    `plugins.updater.endpoints` with your GitHub repository (for example
-   `acme/tablesoft`). Do the same for the download links in `site/index.html`.
+   `acme/tablesail`). Do the same for the download links in `site/index.html`.
 5. **Optional, macOS signing and notarization.** Without these, macOS builds are
    unsigned and users must right-click, Open the first time. Add secrets
    `APPLE_CERTIFICATE` (base64 of the Developer ID .p12), `APPLE_CERTIFICATE_PASSWORD`,

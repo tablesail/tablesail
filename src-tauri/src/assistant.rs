@@ -222,7 +222,7 @@ fn system_prompt(req: &AssistantRequest) -> String {
     };
     let hint = dialect_hint(&req.engine);
     format!(
-        "You are an expert database assistant built into TableSoft, a desktop database client. \
+        "You are an expert database assistant built into TableSail, a desktop database client. \
 The user is connected to {server}{database}.\n\
 \n\
 How to answer:\n\

@@ -84,9 +84,9 @@
   }
 </script>
 
-<Modal title="About TableSoft" {onClose} width="440px">
+<Modal title="About TableSail" {onClose} width="440px">
   <div class="about">
-    <div class="ver"><b>TableSoft</b> {info ? `v${info.version}` : ''}</div>
+    <div class="ver"><b>TableSail</b> {info ? `v${info.version}` : ''}</div>
     <div class="muted">A fast, free, open-source database client.</div>
     {#if info}<div class="muted">Engines: {info.engines.join(', ')}</div>{/if}
 

@@ -1,4 +1,4 @@
-# Test databases for TableSoft, each seeded with the "nasty schema".
+# Test databases for TableSail, each seeded with the "nasty schema".
 #
 #   docker compose up -d --wait     # start and block until every seed has finished
 #   docker compose down -v          # stop and throw the data away (re-seeds next time)
@@ -6,22 +6,22 @@
 # Host ports are deliberately non-default so they never collide with a locally
 # installed server. The same URLs are the defaults in crates/dbcore/tests.
 
-name: tablesoft-testdb
+name: tablesail-testdb
 
 services:
   postgres:
     image: postgres:17
     restart: unless-stopped
     environment:
-      POSTGRES_USER: tablesoft
-      POSTGRES_PASSWORD: tablesoft
-      POSTGRES_DB: tablesoft
+      POSTGRES_USER: tablesail
+      POSTGRES_PASSWORD: tablesail
+      POSTGRES_DB: tablesail
     ports: ["25432:5432"]
     volumes:
       - ./testdb/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
       # The init server only listens on a socket, so a TCP check passes only after seeding.
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tablesoft -d tablesoft"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tablesail -d tablesail"]
       interval: 2s
       timeout: 5s
       retries: 300
@@ -30,16 +30,16 @@ services:
     image: mysql:8.4
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: tablesoft
-      MYSQL_USER: tablesoft
-      MYSQL_PASSWORD: tablesoft
-      MYSQL_DATABASE: tablesoft
+      MYSQL_ROOT_PASSWORD: tablesail
+      MYSQL_USER: tablesail
+      MYSQL_PASSWORD: tablesail
+      MYSQL_DATABASE: tablesail
     ports: ["23306:3306"]
     volumes:
       - ./testdb/mysql/01-nasty.sql:/docker-entrypoint-initdb.d/01-nasty.sql:ro
     healthcheck:
       # The init server runs with --skip-networking, so a TCP ping passes only after seeding.
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -utablesoft -ptablesoft --silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -utablesail -ptablesail --silent"]
       interval: 2s
       timeout: 5s
       retries: 300
@@ -48,10 +48,10 @@ services:
     image: mariadb:11.8
     restart: unless-stopped
     environment:
-      MARIADB_ROOT_PASSWORD: tablesoft
-      MARIADB_USER: tablesoft
-      MARIADB_PASSWORD: tablesoft
-      MARIADB_DATABASE: tablesoft
+      MARIADB_ROOT_PASSWORD: tablesail
+      MARIADB_USER: tablesail
+      MARIADB_PASSWORD: tablesail
+      MARIADB_DATABASE: tablesail
     ports: ["23307:3306"]
     volumes:
       - ./testdb/mysql/01-nasty.sql:/docker-entrypoint-initdb.d/01-nasty.sql:ro
@@ -67,7 +67,7 @@ services:
     image: mongo:8.2
     restart: unless-stopped
     environment:
-      MONGO_INITDB_DATABASE: tablesoft
+      MONGO_INITDB_DATABASE: tablesail
     ports: ["27117:27017"]
     volumes:
       - ./testdb/mongo:/docker-entrypoint-initdb.d:ro
@@ -78,7 +78,7 @@ services:
         - CMD-SHELL
         - >-
           mongosh --quiet --host "$$(hostname -i)" --eval
-          'quit(db.getSiblingDB("tablesoft").seed_done.countDocuments() === 1 ? 0 : 1)'
+          'quit(db.getSiblingDB("tablesail").seed_done.countDocuments() === 1 ? 0 : 1)'
       interval: 2s
       timeout: 10s
       retries: 300

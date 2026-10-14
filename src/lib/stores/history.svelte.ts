@@ -14,7 +14,7 @@ export interface HistoryEntry {
   ok: boolean
 }
 
-const KEY = 'tablesoft.history'
+const KEY = 'tablesail.history'
 const MAX = 500
 
 class HistoryStore {

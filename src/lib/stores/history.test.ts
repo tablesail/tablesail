@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryStorage, installStorage } from '../../test/helpers'
 import type { HistoryEntry } from './history.svelte'
 
-const KEY = 'tablesoft.history'
+const KEY = 'tablesail.history'
 
 async function fresh(initial: Record<string, unknown> = {}) {
   vi.resetModules()

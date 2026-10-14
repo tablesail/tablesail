@@ -210,7 +210,7 @@ describe('sessions.open', () => {
     const saved = { tabs: [{ kind: 'table', table: { database: 'app', name: 'users' }, title: 'users' }], active: 0 }
     const { sessions, tabs } = await setup(
       { connection_open: () => info('s1', { connectionId: 'conn-1' }) },
-      { 'tablesoft.tabs.conn-1': saved },
+      { 'tablesail.tabs.conn-1': saved },
     )
     await sessions.open('conn-1')
     expect(tabs.forSession('s1').map((t) => t.title)).toEqual(['users'])

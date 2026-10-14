@@ -1,4 +1,4 @@
-//! Process-wide log of the statements TableSoft sends to servers, for the
+//! Process-wide log of the statements TableSail sends to servers, for the
 //! console pane. A bounded ring buffer: the newest [`CAPACITY`] entries are kept,
 //! older ones fall off the front. Sequence numbers only ever grow, so a poller
 //! can ask for "everything after the last entry I saw" even across a [`clear`].

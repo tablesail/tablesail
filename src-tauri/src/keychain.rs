@@ -1,9 +1,9 @@
-//! Secrets in the OS keychain: service "TableSoft", account "<connection id>:<kind>".
+//! Secrets in the OS keychain: service "TableSail", account "<connection id>:<kind>".
 
 use dbcore::model::{ConnectionConfig, Secrets, SshAuth};
 use dbcore::{Engine, Error};
 
-const SERVICE: &str = "TableSoft";
+const SERVICE: &str = "TableSail";
 
 type Result<T> = std::result::Result<T, Error>;
 

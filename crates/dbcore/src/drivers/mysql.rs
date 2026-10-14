@@ -1303,8 +1303,8 @@ mod tests {
         c.engine = engine;
         c.host = "127.0.0.1".into();
         c.port = port;
-        c.user = "tablesoft".into();
-        c.database = "tablesoft".into();
+        c.user = "tablesail".into();
+        c.database = "tablesail".into();
         if let Ok(url) = std::env::var(env) {
             c.host = String::new();
             c.port = 0;
@@ -1313,7 +1313,7 @@ mod tests {
             c.url = Some(url);
         }
         let mut p = params(c);
-        p.password = Some("tablesoft".into());
+        p.password = Some("tablesail".into());
         connect(&p)
             .await
             .expect("the docker test database is not running")
@@ -1354,13 +1354,13 @@ mod tests {
         );
         let dbs = d.list_databases().await.unwrap();
         assert!(
-            dbs.contains(&"tablesoft".to_owned()) && dbs.contains(&"tablesoft_other".to_owned()),
+            dbs.contains(&"tablesail".to_owned()) && dbs.contains(&"tablesail_other".to_owned()),
             "{dbs:?}"
         );
         assert!(!dbs.contains(&"information_schema".to_owned()), "{dbs:?}");
-        assert!(d.list_schemas("tablesoft").await.unwrap().is_empty());
+        assert!(d.list_schemas("tablesail").await.unwrap().is_empty());
 
-        let tables = d.list_tables("tablesoft", None).await.unwrap();
+        let tables = d.list_tables("tablesail", None).await.unwrap();
         let find = |n: &str| {
             tables
                 .iter()
@@ -1379,22 +1379,22 @@ mod tests {
         for info in &tables {
             let name = &info.table.name;
             let s = d
-                .table_structure(&t("tablesoft", name))
+                .table_structure(&t("tablesail", name))
                 .await
                 .unwrap_or_else(|e| panic!("structure of {name}: {e}"));
             assert!(!s.columns.is_empty(), "{name}");
             assert!(s.ddl.is_some(), "ddl of {name}");
             let page = d
-                .browse_page(&browse(t("tablesoft", name)), 0, 25)
+                .browse_page(&browse(t("tablesail", name)), 0, 25)
                 .await
                 .unwrap_or_else(|e| panic!("browse {name}: {e}"));
             assert_eq!(page.columns.len(), s.columns.len(), "{name}");
-            d.count_rows(&browse(t("tablesoft", name)))
+            d.count_rows(&browse(t("tablesail", name)))
                 .await
                 .unwrap_or_else(|e| panic!("count {name}: {e}"));
         }
 
-        let orders = d.table_structure(&t("tablesoft", "orders")).await.unwrap();
+        let orders = d.table_structure(&t("tablesail", "orders")).await.unwrap();
         assert_eq!(orders.primary_key, ["id"]);
         assert_eq!(orders.editability, Editability::Editable);
         let col = |n: &str| orders.columns.iter().find(|c| c.name == n).unwrap();
@@ -1408,7 +1408,7 @@ mod tests {
         assert!(!col("total").nullable);
         assert_eq!(orders.foreign_keys.len(), 1);
         assert_eq!(orders.foreign_keys[0].name, "orders_customer_fk");
-        assert_eq!(orders.foreign_keys[0].referenced.database, "tablesoft");
+        assert_eq!(orders.foreign_keys[0].referenced.database, "tablesail");
         assert_eq!(orders.foreign_keys[0].referenced.name, "customers");
         assert_eq!(orders.foreign_keys[0].on_delete.as_deref(), Some("CASCADE"));
         assert!(
@@ -1420,7 +1420,7 @@ mod tests {
         assert!(orders.ddl.unwrap().starts_with("CREATE TABLE `orders`"));
 
         let computed = d
-            .table_structure(&t("tablesoft", "computed"))
+            .table_structure(&t("tablesail", "computed"))
             .await
             .unwrap();
         assert!(
@@ -1440,7 +1440,7 @@ mod tests {
                 .is_generated
         );
         let all = d
-            .table_structure(&t("tablesoft", "all_types"))
+            .table_structure(&t("tablesail", "all_types"))
             .await
             .unwrap();
         let fam = |n: &str| all.columns.iter().find(|c| c.name == n).unwrap().family;
@@ -1456,10 +1456,10 @@ mod tests {
                 .as_deref(),
             Some(&["a".to_owned(), "b".into(), "c".into()][..])
         );
-        let no_pk = d.table_structure(&t("tablesoft", "no_pk")).await.unwrap();
+        let no_pk = d.table_structure(&t("tablesail", "no_pk")).await.unwrap();
         assert!(matches!(no_pk.editability, Editability::ReadOnly(_)));
         let view = d
-            .table_structure(&t("tablesoft", "customer_totals"))
+            .table_structure(&t("tablesail", "customer_totals"))
             .await
             .unwrap();
         assert_eq!(
@@ -1467,31 +1467,31 @@ mod tests {
             Editability::ReadOnly("Views can't be edited.".into())
         );
         assert_eq!(
-            d.table_structure(&t("tablesoft", "composite_pk"))
+            d.table_structure(&t("tablesail", "composite_pk"))
                 .await
                 .unwrap()
                 .primary_key,
             ["tenant_id", "item_id"]
         );
         assert!(matches!(
-            d.table_structure(&t("tablesoft", "nope")).await,
+            d.table_structure(&t("tablesail", "nope")).await,
             Err(Error::NotFound(_))
         ));
 
         let customers = d
-            .count_rows(&browse(t("tablesoft", "customers")))
+            .count_rows(&browse(t("tablesail", "customers")))
             .await
             .unwrap();
         assert_eq!(customers.exact, Some(2));
         let big = d
-            .count_rows(&browse(t("tablesoft", "big_table")))
+            .count_rows(&browse(t("tablesail", "big_table")))
             .await
             .unwrap();
         assert!(
             big.exact.is_none() || big.exact == Some(1_000_000),
             "{big:?}"
         );
-        let mut filtered = browse(t("tablesoft", "big_table"));
+        let mut filtered = browse(t("tablesail", "big_table"));
         filtered.filters = vec![Filter {
             column: "name".into(),
             op: FilterOp::StartsWith,
@@ -1500,12 +1500,12 @@ mod tests {
         assert_eq!(d.count_rows(&filtered).await.unwrap().exact, Some(11));
         let started = Instant::now();
         let page = d
-            .browse_page(&browse(t("tablesoft", "big_table")), 500_000, 100)
+            .browse_page(&browse(t("tablesail", "big_table")), 500_000, 100)
             .await
             .unwrap();
         assert_eq!(page.rows[0][0], Value::Int(500_001));
         eprintln!("big_table page at offset 500000: {:?}", started.elapsed());
-        let mut sorted = browse(t("tablesoft", "big_table"));
+        let mut sorted = browse(t("tablesail", "big_table"));
         sorted.sort = vec![Sort {
             column: "id".into(),
             descending: true,
@@ -1517,7 +1517,7 @@ mod tests {
     }
 
     async fn suite_values(d: Arc<dyn Driver>, mariadb: bool) {
-        let mut r = browse(t("tablesoft", "all_types"));
+        let mut r = browse(t("tablesail", "all_types"));
         r.sort = vec![Sort {
             column: "id".into(),
             descending: false,
@@ -1612,7 +1612,7 @@ mod tests {
 
         // Zero dates are shown exactly as stored.
         let zero = d
-            .browse_page(&browse(t("tablesoft", "zero_dates")), 0, 10)
+            .browse_page(&browse(t("tablesail", "zero_dates")), 0, 10)
             .await
             .unwrap();
         assert_eq!(zero.rows[0][1], Value::Date("0000-00-00".into()));
@@ -1624,7 +1624,7 @@ mod tests {
         assert_eq!(zero.rows[2][1], Value::Date("2024-06-15".into()));
 
         // The full 1 MB value through the export path.
-        let mut one = browse(t("tablesoft", "all_types"));
+        let mut one = browse(t("tablesail", "all_types"));
         one.filters = vec![Filter {
             column: "id".into(),
             op: FilterOp::Eq,
@@ -1646,11 +1646,11 @@ mod tests {
 
         if mariadb {
             let page = d
-                .browse_page(&browse(t("tablesoft", "mariadb_types")), 0, 10)
+                .browse_page(&browse(t("tablesail", "mariadb_types")), 0, 10)
                 .await
                 .unwrap();
             assert_eq!(page.rows.len(), 2);
-            let seq = d.list_tables("tablesoft", None).await.unwrap();
+            let seq = d.list_tables("tablesail", None).await.unwrap();
             assert!(
                 seq.iter()
                     .any(|t| t.table.name == "invoice_seq" && t.kind == TableKind::Sequence)
@@ -1681,7 +1681,7 @@ mod tests {
         );
 
         let mut cursor = d
-            .browse_all(&browse(t("tablesoft", "big_table")))
+            .browse_all(&browse(t("tablesail", "big_table")))
             .await
             .unwrap();
         let mut total = 0usize;
@@ -1727,7 +1727,7 @@ mod tests {
 
         // Several result sets from one CALL.
         let events = drain(
-            d.query(Some("tablesoft"), "CALL multi_results()")
+            d.query(Some("tablesail"), "CALL multi_results()")
                 .await
                 .unwrap(),
         )
@@ -1745,7 +1745,7 @@ mod tests {
 
         // A database can be chosen per query, and session state sticks.
         let events = drain(
-            d.query(Some("tablesoft_other"), "SELECT body FROM notes")
+            d.query(Some("tablesail_other"), "SELECT body FROM notes")
                 .await
                 .unwrap(),
         )
@@ -1755,10 +1755,10 @@ mod tests {
             matches!(&events[1], CursorEvent::Rows(r) if r[0][0] == Value::Text("from another database".into())),
             "{events:?}"
         );
-        drain(d.query(None, "SET @tablesoft_var = 42").await.unwrap())
+        drain(d.query(None, "SET @tablesail_var = 42").await.unwrap())
             .await
             .unwrap();
-        let events = drain(d.query(None, "SELECT @tablesoft_var").await.unwrap())
+        let events = drain(d.query(None, "SELECT @tablesail_var").await.unwrap())
             .await
             .unwrap();
         assert!(
@@ -1781,11 +1781,11 @@ mod tests {
     }
 
     async fn suite_write(d: Arc<dyn Driver>) {
-        let name = format!("tablesoft_scratch_{}", std::process::id());
-        let table = t("tablesoft", &name);
+        let name = format!("tablesail_scratch_{}", std::process::id());
+        let table = t("tablesail", &name);
         let run = |sql: String| {
             let d = d.clone();
-            async move { drain(d.query(Some("tablesoft"), &sql).await.unwrap()).await }
+            async move { drain(d.query(Some("tablesail"), &sql).await.unwrap()).await }
         };
         run(format!("DROP TABLE IF EXISTS `{name}`")).await.unwrap();
         run(format!(
@@ -1901,7 +1901,7 @@ mod tests {
     }
 
     live_engine! {
-        live_mysql: Engine::Mysql, 23306, "TABLESOFT_MYSQL_URL", false;
-        live_mariadb: Engine::Mariadb, 23307, "TABLESOFT_MARIADB_URL", true;
+        live_mysql: Engine::Mysql, 23306, "TABLESAIL_MYSQL_URL", false;
+        live_mariadb: Engine::Mariadb, 23307, "TABLESAIL_MARIADB_URL", true;
     }
 }

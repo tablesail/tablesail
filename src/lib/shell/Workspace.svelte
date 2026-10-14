@@ -23,7 +23,7 @@
 
   let { visible, appVersion }: Props = $props()
 
-  const WIDTH_KEY = 'tablesoft.sidebarWidth'
+  const WIDTH_KEY = 'tablesail.sidebarWidth'
   function readWidth(): number {
     try {
       const n = Number(localStorage.getItem(WIDTH_KEY))
@@ -39,7 +39,7 @@
   /** Small windows get slimmer side panels (instead of hiding the details panel). */
   let narrow = $derived(windowWidth < 1120)
 
-  const LOG_KEY = 'tablesoft.consoleHeight'
+  const LOG_KEY = 'tablesail.consoleHeight'
   let logHeight = $state(readLogHeight())
 
   function readLogHeight(): number {

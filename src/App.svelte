@@ -19,7 +19,7 @@
   theme.init()
 
   // Browser preview only (src/dev/mockTauri.ts): stand-ins for the macOS window controls.
-  const fakeLights = import.meta.env.DEV && (window as unknown as { __TABLESOFT_MOCK__?: boolean }).__TABLESOFT_MOCK__ === true
+  const fakeLights = import.meta.env.DEV && (window as unknown as { __TABLESAIL_MOCK__?: boolean }).__TABLESAIL_MOCK__ === true
 
   let appVersion = $state('')
 

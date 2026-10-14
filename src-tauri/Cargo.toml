@@ -1,12 +1,12 @@
 [package]
-name = "tablesoft"
+name = "tablesail"
 description = "A fast desktop database client"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "tablesoft_lib"
+name = "tablesail_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

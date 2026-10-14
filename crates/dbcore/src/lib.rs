@@ -1,4 +1,4 @@
-//! Database core for TableSoft.
+//! Database core for TableSail.
 //!
 //! Everything that talks to a database lives here, independent of Tauri, so it
 //! can be built and tested without the UI.

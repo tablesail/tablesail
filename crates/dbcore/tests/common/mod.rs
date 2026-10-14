@@ -8,8 +8,8 @@
 //! so tests run in parallel and can be re-run. Seeded tables are only read.
 //!
 //! Servers are the docker-compose databases (see `docker-compose.yml`); URLs can be
-//! overridden with `TABLESOFT_{POSTGRES,MYSQL,MARIADB,MONGO}_URL`. An unreachable
-//! server skips the test, unless `TABLESOFT_REQUIRE_DBS=1`, which fails it.
+//! overridden with `TABLESAIL_{POSTGRES,MYSQL,MARIADB,MONGO}_URL`. An unreachable
+//! server skips the test, unless `TABLESAIL_REQUIRE_DBS=1`, which fails it.
 //!
 //! Each test file uses a different subset of this module.
 #![allow(dead_code, unused_macros, unused_imports)]
@@ -37,7 +37,7 @@ use tokio::sync::Mutex;
 pub type Row = Vec<Value>;
 
 /// Database name every server-engine test works in.
-pub const DB: &str = "tablesoft";
+pub const DB: &str = "tablesail";
 
 pub const SQL: [Engine; 4] = [
     Engine::Sqlite,
@@ -127,28 +127,28 @@ fn env_url(var: &str, default: &str) -> String {
 
 pub fn postgres_url() -> String {
     env_url(
-        "TABLESOFT_POSTGRES_URL",
-        "postgres://tablesoft:tablesoft@127.0.0.1:25432/tablesoft",
+        "TABLESAIL_POSTGRES_URL",
+        "postgres://tablesail:tablesail@127.0.0.1:25432/tablesail",
     )
 }
 
 pub fn mysql_url(engine: Engine) -> String {
     if engine == Engine::Mariadb {
         env_url(
-            "TABLESOFT_MARIADB_URL",
-            "mysql://tablesoft:tablesoft@127.0.0.1:23307/tablesoft",
+            "TABLESAIL_MARIADB_URL",
+            "mysql://tablesail:tablesail@127.0.0.1:23307/tablesail",
         )
     } else {
         env_url(
-            "TABLESOFT_MYSQL_URL",
-            "mysql://tablesoft:tablesoft@127.0.0.1:23306/tablesoft",
+            "TABLESAIL_MYSQL_URL",
+            "mysql://tablesail:tablesail@127.0.0.1:23306/tablesail",
         )
     }
 }
 
 pub fn mongo_url() -> String {
     env_url(
-        "TABLESOFT_MONGO_URL",
+        "TABLESAIL_MONGO_URL",
         "mongodb://127.0.0.1:27117/?serverSelectionTimeoutMS=2000&directConnection=true",
     )
 }
@@ -192,10 +192,10 @@ pub fn config_for(engine: Engine, file: Option<&str>) -> (ConnectionConfig, Opti
             cfg.file_path = Some(file.expect("sqlite needs a file").to_owned());
             return (cfg, None);
         }
-        Engine::Postgres => ("127.0.0.1", 25432, std::env::var("TABLESOFT_POSTGRES_URL")),
-        Engine::Mysql => ("127.0.0.1", 23306, std::env::var("TABLESOFT_MYSQL_URL")),
-        Engine::Mariadb => ("127.0.0.1", 23307, std::env::var("TABLESOFT_MARIADB_URL")),
-        Engine::Mongodb => ("127.0.0.1", 27117, std::env::var("TABLESOFT_MONGO_URL")),
+        Engine::Postgres => ("127.0.0.1", 25432, std::env::var("TABLESAIL_POSTGRES_URL")),
+        Engine::Mysql => ("127.0.0.1", 23306, std::env::var("TABLESAIL_MYSQL_URL")),
+        Engine::Mariadb => ("127.0.0.1", 23307, std::env::var("TABLESAIL_MARIADB_URL")),
+        Engine::Mongodb => ("127.0.0.1", 27117, std::env::var("TABLESAIL_MONGO_URL")),
     };
     match defaults.2 {
         Ok(url) => {
@@ -213,8 +213,8 @@ pub fn config_for(engine: Engine, file: Option<&str>) -> (ConnectionConfig, Opti
                 // The docker Mongo has no authentication.
                 (cfg, None)
             } else {
-                cfg.user = "tablesoft".to_owned();
-                (cfg, Some("tablesoft".to_owned()))
+                cfg.user = "tablesail".to_owned();
+                (cfg, Some("tablesail".to_owned()))
             }
         }
     }
@@ -242,7 +242,7 @@ pub async fn connect_driver(
 
 /// Handles an unreachable server: skip locally, fail in CI.
 fn unavailable(engine: Engine, err: impl std::fmt::Display) {
-    if std::env::var("TABLESOFT_REQUIRE_DBS").is_ok_and(|v| v == "1") {
+    if std::env::var("TABLESAIL_REQUIRE_DBS").is_ok_and(|v| v == "1") {
         panic!("{} is required but unreachable: {err}", engine_name(engine));
     }
     eprintln!(
@@ -305,7 +305,7 @@ impl Ctx {
         let mut file = None;
         let (side, database, schema) = match engine {
             Engine::Sqlite => {
-                let dir = std::env::temp_dir().join(format!("tablesoft-it-{prefix}"));
+                let dir = std::env::temp_dir().join(format!("tablesail-it-{prefix}"));
                 std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
                 let path = dir.join("test.sqlite");
                 cleanups.push(Cleanup::Dir(dir));

@@ -1,4 +1,4 @@
-//! A parser for the mongosh subset TableSoft runs: one statement at a time
+//! A parser for the mongosh subset TableSail runs: one statement at a time
 //! (the splitter is someone else's), turned into a typed `Statement`.
 //!
 //! Arguments are parsed by rewriting mongosh constructors (`ObjectId("..")`,

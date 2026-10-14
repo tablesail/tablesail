@@ -30,11 +30,11 @@ test.describe('connection list', () => {
 
     const local = card(page, 'Local Postgres')
     await expect(local).toContainText('PostgreSQL')
-    await expect(local).toContainText('tablesoft@127.0.0.1:25432/tablesoft')
+    await expect(local).toContainText('tablesail@127.0.0.1:25432/tablesail')
     await expect(local).toContainText('local')
 
     await expect(card(page, 'MariaDB')).toContainText('dev')
-    await expect(card(page, 'Mongo')).toContainText('127.0.0.1:27117/tablesoft')
+    await expect(card(page, 'Mongo')).toContainText('127.0.0.1:27117/tablesail')
     await expect(card(page, 'nasty.db')).toContainText('~/data/nasty.db')
     await expect(card(page, 'Staging API')).toContainText('staging')
   })
@@ -86,7 +86,7 @@ test.describe('connection list', () => {
 
   test('double-click opens a connection and the card then shows Connected', async ({ page }) => {
     await card(page, 'Local MySQL').dblclick()
-    await expect(page.getByRole('button', { name: /MySQL 8\.4\.6 : Local MySQL : tablesoft/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /MySQL 8\.4\.6 : Local MySQL : tablesail/ })).toBeVisible()
     await showConnections(page)
     await expect(card(page, 'Local MySQL')).toContainText('Connected')
     await expect(card(page, 'Local MySQL').getByRole('button', { name: /^Open / })).toHaveCount(0)

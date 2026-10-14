@@ -1052,7 +1052,7 @@ mod tests {
 
     #[test]
     fn previews_a_file() {
-        let dir = std::env::temp_dir().join(format!("tablesoft-csv-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("tablesail-csv-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("t.csv");
         std::fs::write(&path, "\u{feff}id;name\n1;ada\n2;\"lin;us\"\n3;grace\n").unwrap();

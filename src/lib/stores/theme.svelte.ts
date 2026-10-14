@@ -1,6 +1,6 @@
 export type ThemeMode = 'light' | 'dark' | 'system'
 
-const KEY = 'tablesoft.theme'
+const KEY = 'tablesail.theme'
 
 function read(): ThemeMode {
   try {

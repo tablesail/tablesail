@@ -12,7 +12,7 @@ export interface SavedQuery {
   savedAt: number
 }
 
-const KEY = 'tablesoft.savedQueries'
+const KEY = 'tablesail.savedQueries'
 
 class SavedStore {
   list = $state<SavedQuery[]>(load<SavedQuery[]>(KEY, []))

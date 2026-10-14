@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { installStorage } from '../../test/helpers'
 
-const KEY = 'tablesoft.theme'
+const KEY = 'tablesail.theme'
 
 interface Env {
   theme: (typeof import('./theme.svelte'))['theme']

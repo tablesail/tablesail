@@ -65,8 +65,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: TableSoft ${{ github.ref_name }}
-          releaseBody: See the assets below to download TableSoft for your platform.
+          releaseName: TableSail ${{ github.ref_name }}
+          releaseBody: See the assets below to download TableSail for your platform.
           releaseDraft: true
           prerelease: false
           includeUpdaterJson: true

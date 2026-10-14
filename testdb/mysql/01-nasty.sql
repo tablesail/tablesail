@@ -1,6 +1,6 @@
 -- The "nasty schema" for MySQL 8.4 and MariaDB 11. Both servers load this file;
 -- MariaDB-only types live in testdb/mariadb/02-mariadb-only.sql.
--- The docker entrypoint runs it against the `tablesoft` database.
+-- The docker entrypoint runs it against the `tablesail` database.
 
 SET NAMES utf8mb4;
 
@@ -216,10 +216,10 @@ END //
 DELIMITER ;
 
 -- A second database for the sidebar.
-CREATE DATABASE IF NOT EXISTS tablesoft_other;
-CREATE TABLE tablesoft_other.notes (id INT PRIMARY KEY, body TEXT);
-INSERT INTO tablesoft_other.notes VALUES (1, 'from another database');
-GRANT ALL ON tablesoft_other.* TO 'tablesoft'@'%';
+CREATE DATABASE IF NOT EXISTS tablesail_other;
+CREATE TABLE tablesail_other.notes (id INT PRIMARY KEY, body TEXT);
+INSERT INTO tablesail_other.notes VALUES (1, 'from another database');
+GRANT ALL ON tablesail_other.* TO 'tablesail'@'%';
 
 -- ---------------------------------------------------------------------------
 -- Wide table: 150 columns, 1000 rows (TEXT: 150 VARCHARs exceed MariaDB's 8 KB row limit)

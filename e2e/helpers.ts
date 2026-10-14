@@ -160,7 +160,7 @@ export async function runStatement(page: Page) {
 /** What the native file dialogs return (null = cancelled). Read by the mock at call time. */
 export async function setDialog(page: Page, dialog: { open?: string | null; save?: string | null }) {
   await page.evaluate((d) => {
-    ;(window as unknown as { __TABLESOFT_MOCK_DIALOG__: unknown }).__TABLESOFT_MOCK_DIALOG__ = d
+    ;(window as unknown as { __TABLESAIL_MOCK_DIALOG__: unknown }).__TABLESAIL_MOCK_DIALOG__ = d
   }, dialog)
 }
 

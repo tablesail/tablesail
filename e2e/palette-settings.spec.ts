@@ -369,11 +369,11 @@ test.describe('settings', () => {
   test('appearance: System / Light / Dark switch the theme, and the choice persists', async ({ page }) => {
     await settings(page).getByRole('button', { name: 'Dark', exact: true }).click()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark')
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('tablesoft.theme'))).toBe('dark')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('tablesail.theme'))).toBe('dark')
     await settings(page).getByRole('button', { name: 'Light', exact: true }).click()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
     await settings(page).getByRole('button', { name: 'System', exact: true }).click()
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('tablesoft.theme'))).toBe('system')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('tablesail.theme'))).toBe('system')
   })
 
   test('appearance: the active mode is marked', async ({ page }) => {
@@ -442,7 +442,7 @@ test.describe('settings', () => {
     await expect(model.locator('option')).toHaveText(['Claude Sonnet 5.5', 'Claude Opus 5.5', 'Claude Haiku 5.5'])
     await expect(model).toHaveValue('claude-sonnet-5-5')
     await model.selectOption('claude-opus-5-5')
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('tablesoft.assistant.model'))).toBe('claude-opus-5-5')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('tablesail.assistant.model'))).toBe('claude-opus-5-5')
 
     await page.reload()
     await openConnection(page)
@@ -460,7 +460,7 @@ test.describe('settings', () => {
     await page.getByRole('button', { name: 'Menu' }).click()
     await page.getByRole('menuitem', { name: /Settings…/ }).click()
     await settings(page).getByRole('button', { name: 'About…' }).click()
-    await expect(dialog(page, 'About TableSoft')).toBeVisible()
+    await expect(dialog(page, 'About TableSail')).toBeVisible()
   })
 
   test('Done and Escape close the dialog', async ({ page }) => {
@@ -478,7 +478,7 @@ test.describe('about', () => {
     await openConnection(page)
     await page.getByRole('button', { name: 'Menu' }).click()
     await page.getByRole('menuitem', { name: 'About / Check for updates…' }).click()
-    const about = dialog(page, 'About TableSoft')
+    const about = dialog(page, 'About TableSail')
     await expect(about).toContainText('v0.1.0')
     await expect(about).toContainText('Engines: sqlite, postgres, mysql, mariadb, mongodb')
     await about.getByRole('button', { name: 'Check for updates' }).click()

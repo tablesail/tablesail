@@ -255,7 +255,7 @@
   let hidden = $state<string[]>([])
   let columnsMenu = $state<{ x: number; y: number } | null>(null)
   const hiddenKey = $derived(
-    `tablesoft.hiddenColumns.${session.config.id}.${[table.database, table.schema, table.name].join('.')}`,
+    `tablesail.hiddenColumns.${session.config.id}.${[table.database, table.schema, table.name].join('.')}`,
   )
 
   function projection(): string[] {
@@ -879,7 +879,7 @@
   function draftKeys(): string[] {
     const t = `${table.database}.${table.schema ?? ''}.${table.name}`
     // Session ids can change between launches; the connection id lets a draft survive a restart.
-    return [...new Set([`tablesoft:draft:${session.sessionId}:${t}`, `tablesoft:draft:${session.config.id}:${t}`])]
+    return [...new Set([`tablesail:draft:${session.sessionId}:${t}`, `tablesail:draft:${session.config.id}:${t}`])]
   }
 
   function checkDraft() {

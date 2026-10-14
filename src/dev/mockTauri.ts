@@ -25,8 +25,8 @@ import type {
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 const baseConfig = {
-  user: 'tablesoft',
-  database: 'tablesoft',
+  user: 'tablesail',
+  database: 'tablesail',
   ssl: { mode: 'prefer' as const },
   ssh: null,
   color: null,
@@ -101,7 +101,7 @@ const TABLES: TableInfo[] = [
   ['customer_totals', 'view', null],
   ['mood_counts', 'materializedView', null],
 ].map(([name, kind, rows]) => ({
-  database: 'tablesoft',
+  database: 'tablesail',
   schema: 'public',
   name: name as string,
   kind: kind as TableInfo['kind'],
@@ -109,7 +109,7 @@ const TABLES: TableInfo[] = [
   comment: null,
 }))
 
-const BILLING: TableInfo[] = [{ database: 'tablesoft', schema: 'billing', name: 'invoices', kind: 'table', estimatedRows: 2, comment: null }]
+const BILLING: TableInfo[] = [{ database: 'tablesail', schema: 'billing', name: 'invoices', kind: 'table', estimatedRows: 2, comment: null }]
 
 function columnsFor(table: TableRef): ColumnInfo[] {
   return TABLE_COLUMNS[table.name] ?? TABLE_COLUMNS.big_table
@@ -257,7 +257,7 @@ function structure(table: TableRef): TableStructure {
             {
               name: 'orders_customer_id_fkey',
               columns: ['customer_id'],
-              referenced: { database: 'tablesoft', schema: 'public', name: 'customers' },
+              referenced: { database: 'tablesail', schema: 'public', name: 'customers' },
               referencedColumns: ['id'],
               onUpdate: 'NO ACTION',
               onDelete: 'CASCADE',
@@ -282,7 +282,7 @@ function session(id: string): SessionInfo {
     mongodb: 'MongoDB 8.2.1',
     sqlite: 'SQLite 3.50.4',
   }[config.engine]
-  return { sessionId: config.id, config, serverVersion: version, databases: ['tablesoft', 'tablesoft_other', 'postgres'] }
+  return { sessionId: config.id, config, serverVersion: version, databases: ['tablesail', 'tablesail_other', 'postgres'] }
 }
 
 function snapshot(database: string): SchemaSnapshot {
@@ -318,7 +318,7 @@ const queries = new Map<string, { statements: StatementSpan[]; started: number; 
 function resultFor(sql: string): { columns: ColumnInfo[]; total: number } {
   const name = /\bfrom\s+(?:"?\w+"?\.)?"?(\w+)"?/i.exec(sql)?.[1]
   const known = name && [...TABLES, ...BILLING].some((t) => t.name === name) ? name : 'big_table'
-  const table = { database: 'tablesoft', schema: 'public', name: known }
+  const table = { database: 'tablesail', schema: 'public', name: known }
   return { columns: columnsFor(table), total: Math.min(rowCountFor(table), 5000) }
 }
 
@@ -525,11 +525,11 @@ async function handle(cmd: string, args: Record<string, any>): Promise<unknown> 
         })
       })
     }
-    // Native file dialogs: tests set window.__TABLESOFT_MOCK_DIALOG__ = { open, save } (null = cancelled).
+    // Native file dialogs: tests set window.__TABLESAIL_MOCK_DIALOG__ = { open, save } (null = cancelled).
     case 'plugin:dialog|open':
-      return (window as any).__TABLESOFT_MOCK_DIALOG__?.open ?? null
+      return (window as any).__TABLESAIL_MOCK_DIALOG__?.open ?? null
     case 'plugin:dialog|save':
-      return (window as any).__TABLESOFT_MOCK_DIALOG__?.save ?? null
+      return (window as any).__TABLESAIL_MOCK_DIALOG__?.save ?? null
     default:
       if (cmd.startsWith('plugin:')) return null
       return null
@@ -545,5 +545,5 @@ let callbackId = 1
   metadata: { currentWindow: { label: 'main' }, currentWebview: { windowLabel: 'main', label: 'main' } },
 }
 // Lets the UI draw stand-in macOS traffic lights, so browser previews match the real window.
-;(window as any).__TABLESOFT_MOCK__ = true
+;(window as any).__TABLESAIL_MOCK__ = true
 console.info('[mock] Tauri runtime mocked with sample data')

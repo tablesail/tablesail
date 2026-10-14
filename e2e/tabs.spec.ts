@@ -339,7 +339,7 @@ test.describe('preview tabs', () => {
 })
 
 test.describe('restoring tabs', () => {
-  const savedTabs = (page: Page) => page.evaluate(() => localStorage.getItem('tablesoft.tabs.c-pg'))
+  const savedTabs = (page: Page) => page.evaluate(() => localStorage.getItem('tablesail.tabs.c-pg'))
 
   async function disconnect(page: Page) {
     await page.getByRole('button', { name: /^PostgreSQL 17\.6 : Local Postgres/ }).click()

@@ -2,9 +2,9 @@
 //!
 //! SQLite runs in memory and always executes. The server engines connect to the
 //! docker-compose databases; when one is unreachable the test is skipped with a
-//! message, unless TABLESOFT_REQUIRE_DBS=1 (set in CI), in which case it fails.
+//! message, unless TABLESAIL_REQUIRE_DBS=1 (set in CI), in which case it fails.
 //!
-//! URLs can be overridden with TABLESOFT_{POSTGRES,MYSQL,MARIADB,MONGO}_URL.
+//! URLs can be overridden with TABLESAIL_{POSTGRES,MYSQL,MARIADB,MONGO}_URL.
 
 use mongodb::bson::doc;
 use sqlx::{Connection, MySqlConnection, PgConnection, SqliteConnection};
@@ -17,7 +17,7 @@ fn url(var: &str, default: &str) -> String {
 
 /// Handles an unreachable server: skip locally, fail in CI.
 fn unavailable(engine: &str, err: impl std::fmt::Display) {
-    if std::env::var("TABLESOFT_REQUIRE_DBS").is_ok_and(|v| v == "1") {
+    if std::env::var("TABLESAIL_REQUIRE_DBS").is_ok_and(|v| v == "1") {
         panic!("{engine} is required but unreachable: {err}");
     }
     eprintln!("SKIPPED {engine}: {err} (run `docker compose up -d --wait`)");
@@ -86,8 +86,8 @@ async fn sqlite_nasty_schema() {
 #[tokio::test]
 async fn postgres_nasty_schema() {
     let url = url(
-        "TABLESOFT_POSTGRES_URL",
-        "postgres://tablesoft:tablesoft@127.0.0.1:25432/tablesoft",
+        "TABLESAIL_POSTGRES_URL",
+        "postgres://tablesail:tablesail@127.0.0.1:25432/tablesail",
     );
     let mut conn = match PgConnection::connect(&url).await {
         Ok(conn) => conn,
@@ -148,7 +148,7 @@ async fn mysql_like(engine: &str, url: String, extra_tables: &[&str]) {
     };
 
     let tables: Vec<String> = sqlx::query_scalar(
-        "SELECT CAST(table_name AS CHAR) FROM information_schema.tables WHERE table_schema = 'tablesoft'",
+        "SELECT CAST(table_name AS CHAR) FROM information_schema.tables WHERE table_schema = 'tablesail'",
     )
     .fetch_all(&mut conn)
     .await
@@ -169,7 +169,7 @@ async fn mysql_like(engine: &str, url: String, extra_tables: &[&str]) {
 
     let wide_columns: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM information_schema.columns
-         WHERE table_schema = 'tablesoft' AND table_name = 'wide_table'",
+         WHERE table_schema = 'tablesail' AND table_name = 'wide_table'",
     )
     .fetch_one(&mut conn)
     .await
@@ -188,14 +188,14 @@ async fn mysql_like(engine: &str, url: String, extra_tables: &[&str]) {
             .fetch_all(&mut conn)
             .await
             .unwrap();
-    assert_has_all(engine, &databases, &["tablesoft", "tablesoft_other"]);
+    assert_has_all(engine, &databases, &["tablesail", "tablesail_other"]);
 }
 
 #[tokio::test]
 async fn mysql_nasty_schema() {
     let url = url(
-        "TABLESOFT_MYSQL_URL",
-        "mysql://tablesoft:tablesoft@127.0.0.1:23306/tablesoft",
+        "TABLESAIL_MYSQL_URL",
+        "mysql://tablesail:tablesail@127.0.0.1:23306/tablesail",
     );
     mysql_like("mysql", url, &[]).await;
 }
@@ -203,8 +203,8 @@ async fn mysql_nasty_schema() {
 #[tokio::test]
 async fn mariadb_nasty_schema() {
     let url = url(
-        "TABLESOFT_MARIADB_URL",
-        "mysql://tablesoft:tablesoft@127.0.0.1:23307/tablesoft",
+        "TABLESAIL_MARIADB_URL",
+        "mysql://tablesail:tablesail@127.0.0.1:23307/tablesail",
     );
     mysql_like(
         "mariadb",
@@ -217,14 +217,14 @@ async fn mariadb_nasty_schema() {
 #[tokio::test]
 async fn mongo_nasty_schema() {
     let url = url(
-        "TABLESOFT_MONGO_URL",
+        "TABLESAIL_MONGO_URL",
         "mongodb://127.0.0.1:27117/?serverSelectionTimeoutMS=2000&directConnection=true",
     );
     let client = match mongodb::Client::with_uri_str(&url).await {
         Ok(client) => client,
         Err(err) => return unavailable("mongo", err),
     };
-    let db = client.database("tablesoft");
+    let db = client.database("tablesail");
 
     let collections = match db.list_collection_names().await {
         Ok(names) => names,

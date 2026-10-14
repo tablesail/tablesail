@@ -778,8 +778,8 @@ test.describe('columns button (hide columns)', () => {
   test('the choice is remembered per table across reloads', async ({ page }) => {
     await columnsButton(page).click()
     await popover(page).getByRole('checkbox', { name: /^email/ }).uncheck()
-    const key = await page.evaluate(() => Object.keys(localStorage).find((k) => k.startsWith('tablesoft.hiddenColumns.')))
-    expect(key).toBe('tablesoft.hiddenColumns.c-pg.tablesoft.public.customers')
+    const key = await page.evaluate(() => Object.keys(localStorage).find((k) => k.startsWith('tablesail.hiddenColumns.')))
+    expect(key).toBe('tablesail.hiddenColumns.c-pg.tablesail.public.customers')
 
     await page.reload()
     await openConnection(page)

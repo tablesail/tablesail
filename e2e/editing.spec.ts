@@ -589,7 +589,7 @@ test.describe('unsaved changes (drafts)', () => {
     await openTableLoaded(page, 'customers')
     await editFirstName(page, 'Alicia')
     await expect(pending(page)).toHaveText('1 change')
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tablesoft:draft:')).length)).toBeGreaterThan(0)
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tablesail:draft:')).length)).toBeGreaterThan(0)
 
     await page.reload()
     await openConnection(page, 'Local Postgres')
@@ -614,7 +614,7 @@ test.describe('unsaved changes (drafts)', () => {
     await dialog(page, 'Unsaved changes found').getByRole('button', { name: 'Discard' }).click()
     await expect(pending(page)).toHaveCount(0)
     await expect(gridCell(page, 0, 2)).toHaveText('Alice')
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tablesoft:draft:')).length)).toBe(0)
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tablesail:draft:')).length)).toBe(0)
   })
 
   test('the draft prompt cannot be dismissed with Escape or by clicking outside', async ({ page }) => {
@@ -637,6 +637,6 @@ test.describe('unsaved changes (drafts)', () => {
     await editFirstName(page, 'Alicia')
     await action(page, 'Commit').click()
     await expect(bottomBar(page).getByText('Committed')).toBeVisible()
-    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tablesoft:draft:')).length)).toBe(0)
+    await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith('tablesail:draft:')).length)).toBe(0)
   })
 })

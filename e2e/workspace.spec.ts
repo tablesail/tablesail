@@ -17,26 +17,26 @@ import {
 test.describe('toolbar status pill', () => {
   test('shows engine/version : connection : database before any table is open', async ({ page }) => {
     await openConnection(page, 'Local Postgres')
-    const pill = page.getByRole('button', { name: /^PostgreSQL 17\.6 : Local Postgres : tablesoft/ })
+    const pill = page.getByRole('button', { name: /^PostgreSQL 17\.6 : Local Postgres : tablesail/ })
     await expect(pill).toBeVisible()
-    await expect(pill).toHaveText(/PostgreSQL 17\.6\s*:\s*Local Postgres\s*:\s*tablesoft\s*local$/)
+    await expect(pill).toHaveText(/PostgreSQL 17\.6\s*:\s*Local Postgres\s*:\s*tablesail\s*local$/)
     await expect(pill).not.toContainText('public.')
   })
 
   test('adds schema.table for the active table tab and follows tab changes', async ({ page }) => {
     await openConnection(page)
     await openTable(page, 'customers')
-    await expect(page.getByRole('button', { name: /: tablesoft : public\.customers/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /: tablesail : public\.customers/ })).toBeVisible()
     await openTable(page, 'orders')
-    await expect(page.getByRole('button', { name: /: tablesoft : public\.orders/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /: tablesail : public\.orders/ })).toBeVisible()
     await page.getByRole('tab', { name: /customers/ }).click()
-    await expect(page.getByRole('button', { name: /: tablesoft : public\.customers/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /: tablesail : public\.customers/ })).toBeVisible()
   })
 
   test('shows the query tab title for a SQL editor', async ({ page }) => {
     await openConnection(page)
     await page.keyboard.press(`${MOD}+t`)
-    await expect(page.getByRole('button', { name: /: tablesoft : Query 1/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /: tablesail : Query 1/ })).toBeVisible()
   })
 
   for (const [connection, version, tag] of [
@@ -220,18 +220,18 @@ test.describe('sidebar', () => {
   test('the database picker switches database and updates the status pill', async ({ page }) => {
     const side = sidebar(page)
     const db = side.getByRole('combobox', { name: 'Database' })
-    await expect(db.locator('option')).toHaveText(['tablesoft', 'tablesoft_other', 'postgres'])
-    await db.selectOption('tablesoft_other')
-    await expect(page.getByRole('button', { name: /: tablesoft_other$|: tablesoft_other / })).toBeVisible()
+    await expect(db.locator('option')).toHaveText(['tablesail', 'tablesail_other', 'postgres'])
+    await db.selectOption('tablesail_other')
+    await expect(page.getByRole('button', { name: /: tablesail_other$|: tablesail_other / })).toBeVisible()
     await expect(side.getByRole('treeitem').first()).toBeVisible()
   })
 
   test('the toolbar database button offers the same databases', async ({ page }) => {
     await page.getByRole('button', { name: 'Switch database' }).click()
-    await expect(page.getByRole('menuitem')).toHaveText([/^✓\s+tablesoft\s*$/, /^\s*tablesoft_other\s*$/, /^\s*postgres\s*$/])
-    await page.getByRole('menuitem', { name: /tablesoft_other/ }).click()
-    await expect(page.getByRole('button', { name: /: tablesoft_other/ })).toBeVisible()
-    await expect(sidebar(page).getByRole('combobox', { name: 'Database' })).toHaveValue('tablesoft_other')
+    await expect(page.getByRole('menuitem')).toHaveText([/^✓\s+tablesail\s*$/, /^\s*tablesail_other\s*$/, /^\s*postgres\s*$/])
+    await page.getByRole('menuitem', { name: /tablesail_other/ }).click()
+    await expect(page.getByRole('button', { name: /: tablesail_other/ })).toBeVisible()
+    await expect(sidebar(page).getByRole('combobox', { name: 'Database' })).toHaveValue('tablesail_other')
   })
 
   test('table context menu: Open, New query, Export, Import, Copy name, Refresh', async ({ page }) => {
@@ -279,7 +279,7 @@ test.describe('panels and toggles', () => {
     await page.mouse.move(d.x + 120, d.y + 200, { steps: 6 })
     await page.mouse.up()
     await expect.poll(async () => (await box(side)).width).toBeGreaterThan(before + 60)
-    const stored = await page.evaluate(() => Number(localStorage.getItem('tablesoft.sidebarWidth')))
+    const stored = await page.evaluate(() => Number(localStorage.getItem('tablesail.sidebarWidth')))
     expect(stored).toBeGreaterThan(before + 60)
   })
 

@@ -73,9 +73,9 @@ async fn connect_through_a_url(c: &Ctx) {
     }
     let (user, port) = (cfg.user.clone(), cfg.port);
     let url = if c.is_pg() {
-        format!("postgres://{user}:tablesoft@127.0.0.1:{port}/tablesoft")
+        format!("postgres://{user}:tablesail@127.0.0.1:{port}/tablesail")
     } else {
-        format!("mysql://{user}:tablesoft@127.0.0.1:{port}/tablesoft")
+        format!("mysql://{user}:tablesail@127.0.0.1:{port}/tablesail")
     };
     cfg.url = Some(url);
     cfg.host = String::new();
@@ -118,7 +118,7 @@ async fn bad_credentials_and_unreachable_servers_fail_fast(c: &Ctx) {
 
     // Nothing listens on port 1.
     cfg.port = 1;
-    let err = dbcore::drivers::connect(&params_of(cfg, Some("tablesoft".into())))
+    let err = dbcore::drivers::connect(&params_of(cfg, Some("tablesail".into())))
         .await
         .err()
         .expect("a closed port must fail");
@@ -209,7 +209,7 @@ each_engine!(pg_connection_options_apply, postgres);
 
 #[tokio::test]
 async fn sqlite_connect_failures() {
-    let dir = std::env::temp_dir().join(format!("tablesoft-it-connect-{}", uuid::Uuid::new_v4()));
+    let dir = std::env::temp_dir().join(format!("tablesail-it-connect-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
 
     // Missing file: reported, not silently created.
@@ -289,7 +289,7 @@ async fn lists_databases_and_schemas(c: &Ctx) {
             assert_eq!(schemas, sorted, "schemas come back sorted");
         }
         _ => {
-            for d in [DB, "tablesoft_other"] {
+            for d in [DB, "tablesail_other"] {
                 assert!(databases.contains(&d.to_owned()), "{databases:?}");
             }
             for d in ["information_schema", "performance_schema", "mysql", "sys"] {
@@ -489,13 +489,13 @@ async fn seeded_catalog(c: &Ctx) {
         );
     } else {
         // A second database on the same server.
-        let other = c.driver.list_tables("tablesoft_other", None).await.unwrap();
+        let other = c.driver.list_tables("tablesail_other", None).await.unwrap();
         find(&other, "notes");
-        assert_eq!(find(&other, "notes").table.database, "tablesoft_other");
+        assert_eq!(find(&other, "notes").table.database, "tablesail_other");
         let s = c
             .driver
             .table_structure(&TableRef {
-                database: "tablesoft_other".into(),
+                database: "tablesail_other".into(),
                 schema: None,
                 name: "notes".into(),
             })

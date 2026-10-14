@@ -69,8 +69,8 @@ test.describe('editor basics', () => {
 
   test('the database picker lists the databases of the connection', async ({ page }) => {
     const picker = page.locator('.tab-body:not([hidden]) .toolbar select')
-    await expect(picker.locator('option')).toHaveText(['tablesoft', 'tablesoft_other', 'postgres'])
-    await expect(picker).toHaveValue('tablesoft')
+    await expect(picker.locator('option')).toHaveText(['tablesail', 'tablesail_other', 'postgres'])
+    await expect(picker).toHaveValue('tablesail')
     await picker.selectOption('postgres')
     await expect(picker).toHaveValue('postgres')
   })

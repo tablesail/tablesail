@@ -67,5 +67,5 @@ pub fn run() {
             assistant::assistant_key_set,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tablesoft");
+        .expect("error while running tablesail");
 }

@@ -246,7 +246,7 @@ describe('assistant: model', () => {
   })
 
   it('loads the saved model at startup', async () => {
-    const { assistant } = await setup({}, { 'tablesoft.assistant.model': 'claude-opus-5-5' })
+    const { assistant } = await setup({}, { 'tablesail.assistant.model': 'claude-opus-5-5' })
     expect(assistant.model).toBe('claude-opus-5-5')
   })
 
@@ -254,7 +254,7 @@ describe('assistant: model', () => {
     const { assistant } = await setup()
     assistant.setModel('claude-haiku-5-5')
     expect(assistant.model).toBe('claude-haiku-5-5')
-    expect(localStorage.getItem('tablesoft.assistant.model')).toBe('claude-haiku-5-5')
+    expect(localStorage.getItem('tablesail.assistant.model')).toBe('claude-haiku-5-5')
   })
 
   it('works without localStorage', async () => {

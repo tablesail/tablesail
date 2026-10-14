@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "TableSoft",
+  "productName": "TableSail",
   "version": "0.1.0",
-  "identifier": "dev.tablesoft.desktop",
+  "identifier": "app.tablesail.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "TableSoft",
+        "title": "TableSail",
         "width": 1280,
         "height": 800,
         "resizable": true,
@@ -51,11 +51,11 @@
       "icons/icon.ico"
     ],
     "category": "DeveloperTool",
-    "publisher": "TableSoft contributors",
-    "copyright": "Copyright (c) 2026 TableSoft contributors",
+    "publisher": "TableSail contributors",
+    "copyright": "Copyright (c) 2026 TableSail contributors",
     "license": "MIT",
     "shortDescription": "A fast, free, open-source database client",
-    "longDescription": "TableSoft is a fast, free and open-source desktop client for PostgreSQL, MySQL, MariaDB, SQLite and MongoDB, with a virtualized data grid, SQL editor, safe editing, SSH tunnels and streaming export.",
+    "longDescription": "TableSail is a fast, free and open-source desktop client for PostgreSQL, MySQL, MariaDB, SQLite and MongoDB, with a virtualized data grid, SQL editor, safe editing, SSH tunnels and streaming export.",
     "createUpdaterArtifacts": true,
     "macOS": {
       "minimumSystemVersion": "11.0"

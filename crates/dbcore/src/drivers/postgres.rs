@@ -153,7 +153,7 @@ fn pg_options(params: &ConnectParams) -> Result<PgConnectOptions> {
             cfg.options
                 .get("application_name")
                 .map(String::as_str)
-                .unwrap_or("TableSoft"),
+                .unwrap_or("TableSail"),
         )
         // Prepared statements are only used to describe empty results and are
         // deallocated right away; nothing is cached, so nothing can go stale.
@@ -1340,7 +1340,7 @@ mod tests {
         assert_eq!(o.get_port(), 5433);
         assert_eq!(o.get_username(), "alice");
         assert_eq!(o.get_database(), Some("shop"));
-        assert_eq!(o.get_application_name(), Some("TableSoft"));
+        assert_eq!(o.get_application_name(), Some("TableSail"));
     }
 
     #[test]
@@ -1501,9 +1501,9 @@ mod tests {
         let mut c = config();
         c.host = "127.0.0.1".into();
         c.port = 25432;
-        c.user = "tablesoft".into();
-        c.database = "tablesoft".into();
-        if let Ok(url) = std::env::var("TABLESOFT_POSTGRES_URL") {
+        c.user = "tablesail".into();
+        c.database = "tablesail".into();
+        if let Ok(url) = std::env::var("TABLESAIL_POSTGRES_URL") {
             c.host = String::new();
             c.port = 0;
             c.user = String::new();
@@ -1511,7 +1511,7 @@ mod tests {
             c.url = Some(url);
         }
         let mut p = params(c);
-        p.password = Some("tablesoft".into());
+        p.password = Some("tablesail".into());
         connect(&p)
             .await
             .expect("the docker test database is not running")
@@ -1519,7 +1519,7 @@ mod tests {
 
     fn t(schema: &str, name: &str) -> TableRef {
         TableRef {
-            database: "tablesoft".into(),
+            database: "tablesail".into(),
             schema: Some(schema.into()),
             name: name.into(),
         }
@@ -1558,21 +1558,21 @@ mod tests {
             d.list_databases()
                 .await
                 .unwrap()
-                .contains(&"tablesoft".to_owned())
+                .contains(&"tablesail".to_owned())
         );
-        let schemas = d.list_schemas("tablesoft").await.unwrap();
+        let schemas = d.list_schemas("tablesail").await.unwrap();
         for s in ["public", "billing", "Mixed Case Schema", "empty_schema"] {
             assert!(schemas.contains(&s.to_owned()), "{schemas:?}");
         }
         assert!(!schemas.contains(&"pg_catalog".to_owned()));
         assert!(
-            d.list_tables("tablesoft", Some("empty_schema"))
+            d.list_tables("tablesail", Some("empty_schema"))
                 .await
                 .unwrap()
                 .is_empty()
         );
 
-        let tables = d.list_tables("tablesoft", Some("public")).await.unwrap();
+        let tables = d.list_tables("tablesail", Some("public")).await.unwrap();
         let find = |n: &str| {
             tables
                 .iter()
@@ -1812,7 +1812,7 @@ mod tests {
         // Types with a user-defined OID resolve through pg_type even on an empty result.
         let events = drain(
             d.query(
-                Some("tablesoft"),
+                Some("tablesail"),
                 "SELECT c_mood, c_hstore FROM all_types WHERE false",
             )
             .await
@@ -1896,7 +1896,7 @@ mod tests {
             "{err:?}"
         );
         let events = drain(
-            d.query(None, "SET application_name = 'tablesoft-test'")
+            d.query(None, "SET application_name = 'tablesail-test'")
                 .await
                 .unwrap(),
         )
@@ -1911,7 +1911,7 @@ mod tests {
         };
         assert_eq!(
             rows[0][0],
-            Value::Text("tablesoft-test".into()),
+            Value::Text("tablesail-test".into()),
             "session settings persist"
         );
         let empty = drain(
@@ -1929,7 +1929,7 @@ mod tests {
     #[ignore = "needs the docker test databases; writes (and drops) a scratch table"]
     async fn live_write_roundtrip() {
         let d = live().await;
-        let name = format!("tablesoft_scratch_{}", std::process::id());
+        let name = format!("tablesail_scratch_{}", std::process::id());
         let table = t("public", &name);
         let run = |sql: String| {
             let d = d.clone();

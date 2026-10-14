@@ -180,7 +180,7 @@ impl TempPem {
             &std::fs::read_to_string(key)
                 .map_err(|e| Error::Io(format!("client key {key}: {e}")))?,
         );
-        let path = std::env::temp_dir().join(format!("tablesoft-{}.pem", uuid::Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("tablesail-{}.pem", uuid::Uuid::new_v4()));
         let mut options = std::fs::OpenOptions::new();
         options.write(true).create_new(true);
         #[cfg(unix)]
@@ -251,7 +251,7 @@ pub async fn connect(params: &ConnectParams) -> Result<Arc<dyn Driver>> {
     options
         .connect_timeout
         .get_or_insert(SERVER_SELECTION_TIMEOUT);
-    options.app_name.get_or_insert_with(|| "TableSoft".into());
+    options.app_name.get_or_insert_with(|| "TableSail".into());
 
     // Credentials that did not travel in the URI (the password lives in the keychain).
     let password = params.password.clone().filter(|p| !p.is_empty());
@@ -713,7 +713,7 @@ impl Driver for MongoDriver {
         ));
 
         let token = CancellationToken::new();
-        let comment = format!("tablesoft:{}", uuid::Uuid::new_v4());
+        let comment = format!("tablesail:{}", uuid::Uuid::new_v4());
         let cancel = MongoCancel::new(self.client.clone(), comment.clone(), token.clone());
         Ok(Box::new(ChannelCursor::spawn(
             cancel,
@@ -750,7 +750,7 @@ impl Driver for MongoDriver {
             .unwrap_or_else(|| self.default_db.clone());
 
         let token = CancellationToken::new();
-        let comment = format!("tablesoft:{}", uuid::Uuid::new_v4());
+        let comment = format!("tablesail:{}", uuid::Uuid::new_v4());
         let cancel = MongoCancel::new(self.client.clone(), comment.clone(), token.clone());
         let ctx = exec::ExecCtx {
             client: self.client.clone(),

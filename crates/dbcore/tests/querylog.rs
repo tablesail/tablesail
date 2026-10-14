@@ -1,4 +1,4 @@
-//! The query log: every statement TableSoft sends shows up, in order, in the console pane.
+//! The query log: every statement TableSail sends shows up, in order, in the console pane.
 //!
 //! The log is process-wide and these tests run in parallel, so each one finds its own
 //! entries by a marker (its scratch table name) and never clears the log.

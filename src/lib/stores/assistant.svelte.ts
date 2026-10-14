@@ -12,7 +12,7 @@ export const MODELS: { id: string; label: string }[] = [
   { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5' },
 ]
 
-const MODEL_KEY = 'tablesoft.assistant.model'
+const MODEL_KEY = 'tablesail.assistant.model'
 
 function readModel(): string {
   try {

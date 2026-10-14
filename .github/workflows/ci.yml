@@ -28,7 +28,7 @@ jobs:
       - name: cargo test
         run: cargo test -p dbcore
         env:
-          TABLESOFT_REQUIRE_DBS: "1"
+          TABLESAIL_REQUIRE_DBS: "1"
       - name: Database logs on failure
         if: failure()
         run: docker compose logs --tail 200
@@ -70,4 +70,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: npm ci
       - run: npm run build
-      - run: cargo clippy -p tablesoft --all-targets -- -D warnings
+      - run: cargo clippy -p tablesail --all-targets -- -D warnings

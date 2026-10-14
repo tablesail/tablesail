@@ -5667,7 +5667,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "tablesoft"
+name = "tablesail"
 version = "0.1.0"
 dependencies = [
  "dbcore",

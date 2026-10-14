@@ -86,7 +86,7 @@ mod tests {
 
     #[tokio::test]
     async fn round_trips_and_replaces_atomically() {
-        let dir = std::env::temp_dir().join(format!("tablesoft-store-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("tablesail-store-{}", uuid::Uuid::new_v4()));
         assert!(load(&dir).await.unwrap().is_empty());
         save(&dir, &[sample("a"), sample("b")]).await.unwrap();
         save(&dir, &[sample("a")]).await.unwrap();
@@ -100,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn corrupt_file_is_reported_not_overwritten() {
-        let dir = std::env::temp_dir().join(format!("tablesoft-store-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("tablesail-store-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("connections.json"), "{ nope").unwrap();
         let err = load(&dir).await.unwrap_err();

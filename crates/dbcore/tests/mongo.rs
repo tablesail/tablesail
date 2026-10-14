@@ -2167,7 +2167,7 @@ async fn shell_reads(c: &Ctx) {
     assert_eq!(sets_of(&events)[0].rows.len(), 1);
     let events = run_mongo(
         c,
-        "db.getSiblingDB(\"tablesoft\").getCollection(\"select\").find({})",
+        "db.getSiblingDB(\"tablesail\").getCollection(\"select\").find({})",
     )
     .await;
     assert_eq!(sets_of(&events)[0].rows.len(), 1);

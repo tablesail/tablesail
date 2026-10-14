@@ -799,10 +799,10 @@ each_engine!(transactions_span_statements, sql);
 async fn session_state_persists_between_statements(c: &Ctx) {
     match c.engine {
         Engine::Postgres => {
-            c.run("SET application_name = 'tablesoft-sticky'").await;
+            c.run("SET application_name = 'tablesail-sticky'").await;
             assert_eq!(
                 c.scalar("SHOW application_name").await,
-                vtext("tablesoft-sticky")
+                vtext("tablesail-sticky")
             );
             c.run("SET search_path = billing, public").await;
             assert_eq!(c.scalar("SHOW search_path").await, vtext("billing, public"));
@@ -838,13 +838,13 @@ async fn session_state_persists_between_statements(c: &Ctx) {
             c.run("INSERT INTO sticky_tmp VALUES (1), (2)").await;
             assert_eq!(c.scalar("SELECT COUNT(*) FROM sticky_tmp").await, vint(2));
             // A script's own USE stays in effect for its later statements.
-            c.run("USE tablesoft_other").await;
+            c.run("USE tablesail_other").await;
             assert_eq!(
                 c.scalar("SELECT DATABASE()").await,
-                vtext("tablesoft_other")
+                vtext("tablesail_other")
             );
-            c.run("USE tablesoft").await;
-            assert_eq!(c.scalar("SELECT DATABASE()").await, vtext("tablesoft"));
+            c.run("USE tablesail").await;
+            assert_eq!(c.scalar("SELECT DATABASE()").await, vtext("tablesail"));
         }
     }
 }
@@ -968,7 +968,7 @@ async fn other_databases_are_reachable_through_query(c: &Ctx) {
             assert_eq!(sets_of(&events)[0].rows, vec![vec![vtext("postgres")]]);
             assert_eq!(
                 c.scalar("SELECT current_database()").await,
-                vtext("tablesoft")
+                vtext("tablesail")
             );
             // Tables of another database are not visible from this one.
             let err = drain(
@@ -984,7 +984,7 @@ async fn other_databases_are_reachable_through_query(c: &Ctx) {
         _ => {
             let other = drain(
                 c.driver
-                    .query(Some("tablesoft_other"), "SELECT DATABASE()")
+                    .query(Some("tablesail_other"), "SELECT DATABASE()")
                     .await
                     .unwrap(),
             )
@@ -992,20 +992,20 @@ async fn other_databases_are_reachable_through_query(c: &Ctx) {
             .unwrap();
             assert_eq!(
                 sets_of(&other)[0].rows,
-                vec![vec![vtext("tablesoft_other")]]
+                vec![vec![vtext("tablesail_other")]]
             );
             let back = drain(
                 c.driver
-                    .query(Some("tablesoft"), "SELECT DATABASE()")
+                    .query(Some("tablesail"), "SELECT DATABASE()")
                     .await
                     .unwrap(),
             )
             .await
             .unwrap();
-            assert_eq!(sets_of(&back)[0].rows, vec![vec![vtext("tablesoft")]]);
+            assert_eq!(sets_of(&back)[0].rows, vec![vec![vtext("tablesail")]]);
             let notes = drain(
                 c.driver
-                    .query(Some("tablesoft_other"), "SELECT COUNT(*) FROM notes")
+                    .query(Some("tablesail_other"), "SELECT COUNT(*) FROM notes")
                     .await
                     .unwrap(),
             )
@@ -1020,7 +1020,7 @@ async fn other_databases_are_reachable_through_query(c: &Ctx) {
                 Err(e) => assert!(matches!(e, Error::Database { .. }), "{e:?}"),
                 Ok(cursor) => assert!(drain(cursor).await.is_err()),
             }
-            assert_eq!(c.scalar("SELECT DATABASE()").await, vtext("tablesoft"));
+            assert_eq!(c.scalar("SELECT DATABASE()").await, vtext("tablesail"));
         }
     }
 }
