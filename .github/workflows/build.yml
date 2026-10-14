@@ -87,11 +87,15 @@ jobs:
           --config src-tauri/unsigned.conf.json
 
       - name: List what was built
+        env:
+          FILES: ${{ matrix.upload }}
         run: |
           {
             echo "### ${{ matrix.name }}"
             echo '```'
-            ls -lh ${{ matrix.upload }} 2>&1 || true
+            # $FILES is one glob per line; leave it unquoted so each line expands
+            # shellcheck disable=SC2086
+            ls -lh $FILES || true
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
