@@ -77,15 +77,19 @@ for (const [name, viewport] of [['desktop', { width: 1440, height: 900 }], ['pho
   }
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   check(overflow <= 1, `${name}: no sideways scrolling (${overflow}px over)`)
-  // Sections fade in as they are scrolled to; scroll through so the screenshot shows them.
+  // Sections fade in as they are scrolled to. The page scrolls smoothly, so jump instantly or the
+  // loop never gets down the page; then every section must have faded in.
   await page.evaluate(async () => {
-    for (let y = 0; y < document.body.scrollHeight; y += 500) {
-      window.scrollTo(0, y)
-      await new Promise((r) => setTimeout(r, 100))
+    const step = Math.round(window.innerHeight * 0.6)
+    for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
+      window.scrollTo({ top: y, behavior: 'instant' })
+      await new Promise((r) => setTimeout(r, 150))
     }
-    window.scrollTo(0, 0)
+    window.scrollTo({ top: 0, behavior: 'instant' })
   })
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(1000)
+  const hidden = await page.locator('[data-reveal]:not(.visible)').count()
+  check(hidden === 0, `${name}: every section fades in on scroll (${hidden} still hidden)`)
   await page.screenshot({ path: `site-screenshots/${name}.png`, fullPage: true })
   check(errors.length === 0, `${name}: no console errors or failed requests${errors.length ? ` (${errors[0]})` : ''}`)
   await page.close()
