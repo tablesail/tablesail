@@ -4,6 +4,8 @@ A fast, free, open-source desktop database client for **PostgreSQL, MySQL, Maria
 SQLite and MongoDB**. One small native app for macOS, Windows and Linux, built with
 Svelte, Tauri and Rust. MIT licensed, no licence nags.
 
+**Website:** <https://tablesail.github.io/tablesail/>, with an interactive preview of the UI.
+
 > **Status: early (v0.1).** Every engine is tested against live servers and the whole UI
 > has a browser test suite, but the packaged app has so far only been exercised on macOS.
 > SSH tunnels, TLS modes and read-only mode are implemented and not yet tested against real
@@ -130,6 +132,7 @@ keys, reserved-word and unicode names, views, a 150-column table and a 1M-row `b
 | [`ci.yml`](.github/workflows/ci.yml) | push to `main`, pull requests | the gates above, as parallel jobs |
 | [`build.yml`](.github/workflows/build.yml) | run by hand | unsigned installers for macOS (Apple Silicon and Intel), Windows and Linux, attached to the run as artifacts |
 | [`release.yml`](.github/workflows/release.yml) | a `v*` tag | the same installers on a draft GitHub Release, plus the auto-update manifest when the signing key is set |
+| [`pages.yml`](.github/workflows/pages.yml) | changes under `site/` | publishes the landing page to GitHub Pages, then checks the live site (SEO tags, the interactive preview, desktop and phone screenshots) |
 
 To get installers without releasing: open the repository's Actions tab, choose **Build
 installers**, and run it. Or from a terminal:
@@ -154,7 +157,7 @@ Releases, signing keys and the auto-updater are covered in
 | `e2e/` | Playwright tests |
 | `testdb/` | "Nasty schema" seeds for every engine |
 | `scripts/` | `ci.sh` (the CI gates) and helpers |
-| `site/` | The landing page, plain static HTML |
+| `site/` | The landing page: one static HTML file, no build step. Edit it and push to `main` to redeploy |
 | `docs/` | Release notes for maintainers |
 
 [PLAN.md](PLAN.md) has the roadmap and the performance targets.

@@ -1,0 +1,88 @@
+name: Pages
+
+# Publishes site/ (the landing page) to GitHub Pages, then checks the live site.
+# Runs when the page changes, or by hand from the Actions tab.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'scripts/site-smoke.mjs'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: pages
+        uses: actions/configure-pages@v5
+
+      # The canonical, Open Graph, sitemap and robots URLs must be absolute. They are written
+      # as %%SITE_URL%% in site/ and stamped here, so a custom domain needs no code change.
+      - name: Stamp the site URL and date
+        env:
+          BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+          base="${BASE_URL%/}"
+          today="$(date -u +%F)"
+          rm -rf _site
+          cp -R site _site
+          grep -rlE '%%[A-Z_]+%%' _site | while read -r file; do
+            sed -i "s|%%SITE_URL%%|${base}|g; s|%%DATE%%|${today}|g" "$file"
+          done
+          if grep -rnE '%%[A-Z_]+%%' _site; then
+            echo "::error::a placeholder was left in the site"
+            exit 1
+          fi
+          for file in index.html 404.html robots.txt sitemap.xml site.webmanifest og-image.png favicon.svg; do
+            test -s "_site/$file"
+          done
+          python3 -c "import json; json.load(open('_site/site.webmanifest'))"
+          echo "Stamped ${base} / ${today}"
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  smoke:
+    name: Check the live site
+    needs: deploy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chrome
+      - run: node scripts/site-smoke.mjs "${{ needs.deploy.outputs.url }}"
+      - name: Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-screenshots
+          path: site-screenshots
+          if-no-files-found: ignore
+          retention-days: 14

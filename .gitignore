@@ -37,3 +37,7 @@ src-tauri/gen/schemas
 # Playwright
 /test-results
 /playwright-report
+
+# Landing page deploy
+/_site
+/site-screenshots
